@@ -1,0 +1,9 @@
+.preview/
+*-shots/
+.DS_Store
+node_modules/
+.env
+.env.*
+!.env.example
+*.pem
+*.key

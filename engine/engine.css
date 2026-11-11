@@ -1,0 +1,97 @@
+/* ArchTalk · 架构讲图 —— 样式。MIT License, (c) 2026 xiaoni zhou / 心晴九天. */
+:root{
+  --bg:#0e0f11; --ink:#ebe7df; --ink2:#a9a59c; --dim:#6f6c66; --panel:#121417; --grid:rgba(255,255,255,.055);
+  --blue:#6cb6ff; --amber:#f3b553; --mint:#6be0ae; --coral:#ff7268; --cfg:#b9b3a6; --violet:#b59cff;
+  --hand:"Hannotate SC","HanziPen SC","Kaiti SC","STKaiti","KaiTi",cursive;
+  --mono:"SF Mono","JetBrains Mono","Menlo",monospace;
+}
+.light{
+  --bg:#f6f3ec; --ink:#1f1f22; --ink2:#55524c; --dim:#9a968e; --panel:#fbf9f4; --grid:rgba(0,0,0,.07);
+  --blue:#1f6fd1; --amber:#c27a0e; --mint:#178a5a; --coral:#d23c32; --cfg:#77736a; --violet:#6b4fd1;
+}
+html,body{margin:0;width:100%;height:100%;background:#050506;overflow:hidden}
+body.light{background:#d9d5cc}
+#stage{position:fixed;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;background:var(--bg);overflow:hidden}
+#stage svg{position:absolute;left:0;top:0;display:block;width:1920px;height:1080px}
+#hud{pointer-events:none}
+text{fill:var(--ink)}
+.hand{font-family:var(--hand)}
+.mono{font-family:var(--mono)}
+.t-title{font-family:var(--hand);font-size:50px;fill:var(--ink)}
+.t-eyebrow{font-family:var(--mono);font-size:16px;letter-spacing:3px;fill:var(--ink2)}
+.t-mod{font-family:var(--hand);font-size:27px;fill:var(--ink)}
+.t-label{font-family:var(--mono);fill:var(--ink)}
+.t-sub{font-family:var(--hand);fill:var(--ink2)}
+.t-note{font-family:var(--hand);font-size:23px}
+.t-small{font-family:var(--hand);font-size:19px;fill:var(--ink2)}
+.t-elabel{font-family:var(--hand);font-size:17px}
+.stroke-main{fill:none;stroke:var(--ink);stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.stroke-ghost{fill:none;stroke:var(--ink);stroke-width:1.1;opacity:.45;stroke-linecap:round}
+/* 节点用实心底：从节点背后穿过的连线会被挡住，不压字 */
+.fill-node{fill:#141518}
+.light .fill-node{fill:#fffdf8}
+.frame .stroke-main{stroke:var(--ink2);stroke-width:1.7}
+.frame.outer .stroke-main{stroke-dasharray:10 9;stroke:var(--mint);opacity:.75}
+.dimmable{transition:opacity .7s ease}
+.dimmable.dim{opacity:.1}
+.dimmable.half{opacity:.32}
+.lit .stroke-main{stroke:var(--blue);filter:url(#soft);animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{stroke-opacity:.55}50%{stroke-opacity:1}}
+.edge{fill:none;stroke-width:2.2;opacity:0;transition:opacity .6s ease;stroke-linecap:round;stroke-linejoin:round}
+.edge.on{opacity:.8}
+.edge.call{stroke:var(--blue)} .edge.fact{stroke:var(--amber)} .edge.proj{stroke:var(--mint);stroke-dasharray:2 9;stroke-width:2.6}
+.edge.dep{stroke:var(--dim);stroke-dasharray:9 8} .edge.cfg{stroke:var(--cfg)} .edge.evt{stroke:var(--violet);stroke-dasharray:12 6}
+.edge.warn{stroke:var(--coral)!important;opacity:.95}
+.elabel{opacity:0;transition:opacity .6s ease}
+.elabel.on{opacity:1}
+.elabel rect{fill:var(--bg)}
+.note{opacity:0;transition:opacity .6s ease, transform .6s ease;transform:translateY(6px)}
+.note.on{opacity:1;transform:none}
+.note rect.bg{fill:var(--bg);opacity:.9}
+.inset{opacity:0;transition:opacity .55s ease}
+.inset.on{opacity:1}
+.inset .ibg{fill:var(--panel);stroke:var(--ink2);stroke-width:1.4}
+.chip rect{fill:rgba(255,255,255,.03);stroke:var(--ink2);stroke-width:1.4;transition:stroke .3s}
+.light .chip rect{fill:#fff}
+.chip.on rect{stroke:var(--blue);stroke-width:2.2;filter:url(#soft)}
+.chip.lock rect{stroke:var(--amber);stroke-dasharray:5 5}
+.chip.lock.on rect{stroke:var(--amber);stroke-dasharray:none;filter:url(#glow)}
+.chip.warn rect{stroke:var(--coral)!important}
+.chip.ok rect{stroke:var(--mint)!important;filter:url(#soft)}
+.chip.on text{fill:var(--ink)}
+.chip text{fill:var(--ink2)}
+.chip.gone{opacity:.18;transition:opacity .6s}
+.state-gone{opacity:.18!important}
+.node.failed .stroke-main{stroke:var(--coral)!important;filter:url(#soft)}
+.node.off .stroke-main{stroke:var(--dim)!important;stroke-dasharray:6 7}
+.node.flash .stroke-main{stroke:var(--mint)!important;filter:url(#glow)}
+.node.mount .stroke-main,.frame.mount .stroke-main{stroke:var(--mint)!important;filter:url(#glow)}
+.cell{transition:transform .5s ease, opacity .5s ease}
+.ghostcell{transition:opacity .25s}
+.bar{transition:width .2s linear}
+#hudinfo{transition:opacity .4s}
+#hudinfo.hide{opacity:0}
+.legend-pulse{animation:lp 1.6s ease-in-out infinite}
+@keyframes lp{0%,100%{opacity:.55}50%{opacity:1}}
+.ticker{opacity:0;transition:opacity .5s}
+.ticker.on{opacity:1}
+.pill rect{fill:var(--bg);stroke:var(--dim);stroke-width:1.3}
+.pill text{fill:var(--dim)}
+.pill.on rect{stroke:var(--blue);filter:url(#soft)}
+.pill.on text{fill:var(--ink)}
+.pill.done text{fill:var(--ink2)}
+.badge{opacity:0;transition:opacity .4s}
+.badges.on .badge{opacity:.55}
+.badges.on .badge.on{opacity:1}
+.badge circle{fill:var(--bg);stroke:var(--blue);stroke-width:2}
+.badge.on circle{filter:url(#glow);fill:var(--blue)}
+.badge.on text{fill:var(--bg)}
+.pkt rect{fill:var(--bg);stroke-width:1.2}
+.pkt text{font-family:var(--mono);font-size:14px}
+.row{opacity:0;transition:opacity .5s}
+.row.on{opacity:1}
+.fade{opacity:0;transition:opacity .5s}
+.fade.on{opacity:1}
+#cap{position:absolute;left:160px;right:160px;bottom:84px;padding:18px 28px;border-radius:14px;background:rgba(8,9,11,.82);color:#f2efe8;font:30px/1.5 "PingFang SC","Hiragino Sans GB",sans-serif;opacity:0;transition:opacity .3s;pointer-events:none}
+#cap.on{opacity:1}
+.light #cap{background:rgba(255,255,255,.9);color:#1f1f22}

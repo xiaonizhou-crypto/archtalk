@@ -1,0 +1,739 @@
+{
+  "title": "DeepSeek Harness：按模块拆开，Agent 到底怎么跑",
+  "eyebrow": "ARCHTALK 示例 · DEEPSEEK HARNESS · 8bd0733",
+  "brand": "心晴九天",
+  "lang": "zh-CN",
+  "legend": [
+    "call",
+    "fact",
+    "proj",
+    "dep"
+  ],
+  "terms": [
+    "DeepSeek"
+  ],
+  "sources": [
+    "deepseek-ai/deepseek-harness@8bd073392eef6f54e921a093b95076248eb08cbb（2026-11-03）",
+    "docs/architecture.md：Every part of the product is a plugin…；Model-visible means logged…；Fork, resume, transcripts… derive from these durable settlements"
+  ],
+  "layout": {
+    "rows": [
+      {
+        "h": 0.6,
+        "modules": [
+          {
+            "id": "cordis",
+            "label": "Cordis 骨架 · 所有插件的底座",
+            "style": "outer",
+            "nodes": [
+              {
+                "id": "assemble",
+                "label": "装配",
+                "sub": "配置合成插件树"
+              },
+              {
+                "id": "deps",
+                "label": "依赖",
+                "sub": "谁提供能力由配置定"
+              },
+              {
+                "id": "exit",
+                "label": "退出",
+                "sub": "先停驱动，再放资源"
+              }
+            ],
+            "nodeH": 64
+          }
+        ]
+      },
+      {
+        "h": 1,
+        "modules": [
+          {
+            "id": "drv",
+            "label": "驱动核心",
+            "span": 0.9,
+            "dir": "col",
+            "nodes": [
+              {
+                "id": "registry",
+                "label": "公共接口",
+                "sub": "插件只认这一层"
+              },
+              {
+                "id": "loop",
+                "label": "默认驱动",
+                "sub": "推着 Agent 一步步干活"
+              }
+            ],
+            "gap": 12
+          },
+          {
+            "id": "tools",
+            "label": "工具系统 · Function Call 落地",
+            "span": 2.1,
+            "nodes": [
+              {
+                "id": "tdef",
+                "label": "定义层",
+                "sub": "有哪些 · 谁能看见"
+              },
+              {
+                "id": "tcall",
+                "label": "调用层",
+                "sub": "怎么交给模型"
+              },
+              {
+                "id": "texec",
+                "label": "执行层",
+                "sub": "审批 · 安全检查"
+              }
+            ]
+          },
+          {
+            "id": "llm",
+            "label": "模型",
+            "span": 0.7,
+            "nodes": [
+              {
+                "id": "adapter",
+                "label": "模型适配器",
+                "sub": "可以热替换"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "h": 0.72,
+        "modules": [
+          {
+            "id": "session",
+            "label": "Session",
+            "nodes": [
+              {
+                "id": "log",
+                "label": "只追加、不改写的一本账",
+                "sub": "所有事实都记在这里",
+                "w": 1.2
+              },
+              {
+                "spacer": true,
+                "w": 1
+              }
+            ],
+            "nodeH": 72
+          }
+        ]
+      },
+      {
+        "h": 0.8,
+        "modules": [
+          {
+            "id": "hist",
+            "label": "历史与存储",
+            "nodes": [
+              {
+                "id": "pick",
+                "label": "挑选",
+                "sub": "模型该看什么"
+              },
+              {
+                "id": "history",
+                "label": "模型历史",
+                "sub": "每一步现生成"
+              },
+              {
+                "id": "views",
+                "label": "业务视图",
+                "sub": "各模块自己的"
+              },
+              {
+                "id": "write",
+                "label": "写文件",
+                "sub": "按会话排队"
+              },
+              {
+                "id": "flush",
+                "label": "刷盘",
+                "sub": "成功才算存住"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "edges": [
+    {
+      "id": "e_llm",
+      "from": "loop",
+      "to": "adapter",
+      "type": "call",
+      "label": "调用模型",
+      "dir": "h",
+      "bend": -150
+    },
+    {
+      "id": "e_tool",
+      "from": "loop",
+      "to": "tdef",
+      "type": "call",
+      "label": "执行工具"
+    },
+    {
+      "id": "e_t1",
+      "from": "tdef",
+      "to": "tcall",
+      "type": "call"
+    },
+    {
+      "id": "e_t2",
+      "from": "tcall",
+      "to": "texec",
+      "type": "call"
+    },
+    {
+      "id": "e_res",
+      "from": "texec",
+      "to": "log",
+      "type": "fact",
+      "label": "工具结果"
+    },
+    {
+      "id": "e_msg",
+      "from": "loop",
+      "to": "log",
+      "type": "fact",
+      "label": "模型回复"
+    },
+    {
+      "id": "e_pick",
+      "from": "log",
+      "to": "pick",
+      "type": "proj"
+    },
+    {
+      "id": "e_hist",
+      "from": "pick",
+      "to": "history",
+      "type": "proj"
+    },
+    {
+      "id": "e_back",
+      "from": "history",
+      "to": "loop",
+      "type": "proj",
+      "dir": "v"
+    },
+    {
+      "id": "e_views",
+      "from": "log",
+      "to": "views",
+      "type": "proj",
+      "label": "投影"
+    },
+    {
+      "id": "e_write",
+      "from": "log",
+      "to": "write",
+      "type": "fact"
+    },
+    {
+      "id": "e_flush",
+      "from": "write",
+      "to": "flush",
+      "type": "fact"
+    },
+    {
+      "id": "e_dep",
+      "from": "deps",
+      "to": "loop",
+      "type": "dep",
+      "dir": "v"
+    }
+  ],
+  "insets": [
+    {
+      "id": "hook",
+      "type": "text",
+      "place": "full",
+      "hero": true,
+      "lines": [
+        {
+          "text": "Agent 的默认推进循环，也可以是一个可替换的插件",
+          "color": "mint"
+        },
+        {
+          "text": "DeepSeek Harness 用同一套插件机制装配模型、工具、会话和默认驱动",
+          "color": "amber"
+        },
+        {
+          "text": "懂这些交接点，才能替换插件、二次开发、排查 bad case",
+          "color": "blue"
+        },
+        {
+          "text": "本示例按固定版本源码讲解；不代表其他框架或后续版本的行为",
+          "color": "ink2"
+        }
+      ]
+    },
+    {
+      "id": "locks",
+      "type": "steps",
+      "place": "bottom",
+      "title": "一次请求，过两道锁",
+      "steps": [
+        "领取输入",
+        {
+          "label": "锁① 模型 + 工具快照",
+          "lock": true
+        },
+        "组装提示词",
+        {
+          "label": "锁② 绑定适配器",
+          "lock": true
+        },
+        "记进 Session",
+        "发出"
+      ],
+      "lines": [
+        {
+          "text": "为什么锁：准备请求是异步的，中途工具可能卸掉、适配器可能热替换",
+          "color": "amber"
+        },
+        {
+          "text": "好处：重试不会把用户的话再吃一遍；代价：插件在请求阶段能改的变少",
+          "color": "ink2"
+        }
+      ]
+    },
+    {
+      "id": "race",
+      "type": "race",
+      "place": "center",
+      "title": "一批工具调用：一起跑，按模型的顺序进历史",
+      "tasks": [
+        {
+          "label": "#1 可并发",
+          "len": 0.62
+        },
+        {
+          "label": "#2 可并发",
+          "len": 0.17
+        },
+        {
+          "label": "#3 可并发",
+          "len": 0.26
+        },
+        {
+          "label": "#4 独占",
+          "len": 0.2,
+          "exclusive": true
+        }
+      ],
+      "footer": "前面一个慢，后面跑完的也得等：换来稳定的顺序，代价是队头等待"
+    },
+    {
+      "id": "memory",
+      "type": "text",
+      "place": "center",
+      "title": "那记忆呢？",
+      "lines": [
+        {
+          "text": "这版源码里没有单独的长期记忆模块",
+          "color": "amber"
+        },
+        {
+          "text": "能做的是 resume 和 fork：重新打开存下的会话，或者分叉出一个新会话",
+          "color": "blue"
+        },
+        {
+          "text": "跨对话记忆要自己写插件；召回的内容要喂给模型，也得先记进 Session",
+          "color": "mint"
+        }
+      ]
+    },
+    {
+      "id": "deplife",
+      "type": "steps",
+      "place": "bottom",
+      "title": "依赖走了跟着下线，回来了自动装回",
+      "steps": [
+        "工具服务下线",
+        "驱动自动卸载",
+        "工具服务回来",
+        "驱动自动装回",
+        {
+          "label": "例外：出错不自愈",
+          "lock": true
+        }
+      ],
+      "lines": [
+        {
+          "text": "组件自己出错进了失败状态，依赖回来也不会自己好，得手动恢复",
+          "color": "amber"
+        },
+        {
+          "text": "契约定得松，复杂度会摊给每个实现方；插件化买到的是可维护性",
+          "color": "ink2"
+        }
+      ]
+    },
+    {
+      "id": "owner",
+      "type": "table",
+      "place": "full",
+      "title": "出了 bad case，先查这段状态归谁管",
+      "columns": [
+        "模块",
+        "它管的状态",
+        "最常见的坑"
+      ],
+      "widths": [
+        0.9,
+        1.5,
+        1.6
+      ],
+      "rows": [
+        [
+          "骨架",
+          "服务绑定 · 依赖",
+          "调度不等于外部事务"
+        ],
+        [
+          "驱动",
+          "活跃的 Agent · 每一步的推进",
+          "插件只碰公共接口"
+        ],
+        [
+          "待处理输入",
+          "下一轮、下一步的输入队列",
+          "已经领取的输入改不了"
+        ],
+        [
+          "工具层",
+          "定义 · 准入",
+          "注册了不等于模型看得见"
+        ],
+        [
+          "Session",
+          "已经提交的事实",
+          "原始日志不等于给模型的历史"
+        ],
+        [
+          "存储层",
+          "写入队列 · 刷盘",
+          "写进内存不等于已经落盘"
+        ]
+      ]
+    },
+    {
+      "id": "tiers",
+      "type": "cards",
+      "place": "full",
+      "title": "基于 DeepSeek Harness 做二次开发：三档",
+      "items": [
+        {
+          "head": "轻 · 改配置",
+          "text": "换预设，按插件包、预设、用户目录、命令行四层覆盖，不碰代码就能换组合"
+        },
+        {
+          "head": "中 · 换插件",
+          "text": "按依赖契约写一个插件包，把工具集、模型适配或持久化换成自己的"
+        },
+        {
+          "head": "重 · 换驱动",
+          "text": "实现公共的 Agent 接口，替掉默认循环；只认公共接口的插件照样能用"
+        }
+      ],
+      "footer": "提醒：还在早期，上生产先评估成熟度 · 契约要定严 · 组件出错不会自己恢复 · 退出顺序自己写清"
+    }
+  ],
+  "scenes": [
+    {
+      "key": "钩子",
+      "title": "连 [Agent 循环] 都能替换的 Harness",
+      "inset": "hook",
+      "say": "一个Agent框架里，连负责一轮轮推进的循环本身，也可以是插件。DeepSeek Harness的架构文档明确写着：模型适配、工具注册、会话日志和默认驱动，都按插件装配，可以从配置替换。今天就沿着这几个交接点拆开看：谁去调模型，工具怎么执行，什么内容进会话，插件卸载时又怎么收尾。你要换一套工具、接自己的存储，或者排查一次没达到预期的运行，都得先知道状态和责任落在哪里。这里讲的是固定版本的实现。"
+    },
+    {
+      "key": "全景",
+      "title": "先看地图：[五个模块]",
+      "draw": true,
+      "say": "先看地图，五个模块。谁去调模型：驱动核心。Function Call怎么落地：工具系统。上下文怎么维护、记忆怎么存：Session和历史与存储。插件从哪接进来：最上面这圈Cordis骨架。每个模块只讲四件事：管什么，跟谁交接，为什么这么切，代价是什么。"
+    },
+    {
+      "key": "驱动",
+      "title": "谁去调模型：[驱动核心]和两道锁",
+      "show": [
+        "drv",
+        "llm"
+      ],
+      "lit": [
+        "loop"
+      ],
+      "inset": "locks",
+      "flow": [
+        {
+          "edge": "e_llm",
+          "label": "请求"
+        }
+      ],
+      "say": "驱动核心分两层：对外一个公共接口，里面一个默认实现，推着Agent一步一步干活。插件只认公共接口，所以整套驱动换掉，生态不用跟着改。驱动每次调模型，要过两道锁：先把用哪个模型、准用哪些工具拍个快照，再把请求绑到当前这一版的模型适配器上。准备请求是异步的，不锁的话，模型看到的工具清单和真正发出去的请求可能对不上。"
+    },
+    {
+      "key": "工具系统",
+      "title": "Function Call 落地：[工具系统三层]",
+      "show": [
+        "drv",
+        "tools",
+        "session"
+      ],
+      "zoom": [
+        "drv",
+        "tools",
+        "session"
+      ],
+      "trace": [
+        {
+          "edge": "e_tool",
+          "label": "调用"
+        },
+        {
+          "edge": "e_t1"
+        },
+        {
+          "edge": "e_t2"
+        },
+        {
+          "edge": "e_res",
+          "label": "工具结果"
+        }
+      ],
+      "notes": [
+        {
+          "at": "tools",
+          "pos": "above",
+          "text": "声明和执行由同一层负责：不会告诉模型一套、实际执行另一套",
+          "color": "amber",
+          "size": 20
+        }
+      ],
+      "say": "模型说要调工具，接下来就是工具系统，Function Call真正落地的地方。它拆成三层：一层管有哪些工具、谁能看见、准不准用；一层管怎么把工具交给模型；最后一层管执行规矩：审批、安全检查、结果整理。协议变了只动中间那层，规矩变了只动最后一层。"
+    },
+    {
+      "key": "并发",
+      "title": "一起跑，但[按模型的顺序]进历史",
+      "show": [
+        "tools"
+      ],
+      "lit": [
+        "texec"
+      ],
+      "inset": "race",
+      "say": "模型一次常常要调好几个工具。标了可以并发的，放进一个有上限的池子一起跑，其余的一个个来。跑可以一起跑，写进历史必须按模型发起的顺序：二号、三号先跑完了，也得等一号。全串行最好排查但慢，谁先跑完谁先写最快但顺序乱。它取中间，代价是队头等待，行话叫head-of-line blocking。"
+    },
+    {
+      "key": "Session",
+      "title": "所有事实，只记[一本账]",
+      "show": [
+        "session",
+        "drv",
+        "tools"
+      ],
+      "lit": [
+        "log"
+      ],
+      "flow": [
+        {
+          "edge": "e_msg",
+          "label": "模型回复"
+        },
+        {
+          "edge": "e_res",
+          "label": "工具结果"
+        }
+      ],
+      "notes": [
+        {
+          "at": "log",
+          "pos": "right",
+          "text": "硬规矩：模型能看到的东西，\n必须先记进这本账",
+          "color": "amber",
+          "size": 21
+        }
+      ],
+      "say": "工具结果、模型回复，最后都写进同一个地方：Session，一本只追加、不改写的账，行话叫single source of truth。模型、界面、存储都想知道发生了什么，各记一份迟早对不上。官方还定了一条硬规矩：模型能看到的东西，必须先记进这本账。你想给模型塞一段额外的上下文，也得先写成Session里的一条记录。"
+    },
+    {
+      "key": "历史与存储",
+      "title": "上下文怎么维护：[一本账，两条路]",
+      "show": [
+        "session",
+        "hist",
+        "drv"
+      ],
+      "lit": [
+        "hist"
+      ],
+      "flow": [
+        {
+          "edge": "e_pick",
+          "label": "该看的部分"
+        },
+        {
+          "edge": "e_hist"
+        },
+        {
+          "edge": "e_back",
+          "label": "下一步的历史"
+        },
+        {
+          "edge": "e_views"
+        },
+        {
+          "edge": "e_write",
+          "label": "会话事件"
+        },
+        {
+          "edge": "e_flush"
+        }
+      ],
+      "states": [
+        {
+          "node": "flush",
+          "state": "off",
+          "at": 600,
+          "until": 1800
+        },
+        {
+          "node": "flush",
+          "state": "flash",
+          "at": 1800,
+          "until": 2600
+        }
+      ],
+      "say": "上下文怎么维护？这一层把一本账分成两条路。一条给模型：每一步都从账里挑出该看的部分，现生成一份历史，驱动自己不攒历史。另一条给磁盘：按会话排队写文件，刷盘成功才算真存住，所以告诉用户已保存，必须等刷盘成功。"
+    },
+    {
+      "key": "记忆",
+      "title": "那[记忆]呢？",
+      "inset": "memory",
+      "say": "再说记忆。在我读的这版源码里，没有一个单独的长期记忆模块。它能做的是resume和fork：把存下来的会话重新打开接着聊，或者分叉出一个新会话。跨对话的长期记忆，得你自己写插件，而且按刚才那条规矩，召回的记忆要喂给模型，也得先进Session。"
+    },
+    {
+      "key": "Cordis",
+      "title": "插件从哪接：[Cordis 骨架]",
+      "show": [
+        "cordis",
+        "drv",
+        "tools"
+      ],
+      "lit": [
+        "deps"
+      ],
+      "inset": "deplife",
+      "edges": [
+        "e_dep"
+      ],
+      "flow": [
+        {
+          "edge": "e_dep",
+          "label": "六种能力",
+          "count": 1
+        }
+      ],
+      "states": [
+        {
+          "node": "tdef",
+          "state": "off",
+          "at": 600,
+          "until": 2600
+        },
+        {
+          "node": "loop",
+          "state": "off",
+          "at": 1300,
+          "until": 3300
+        },
+        {
+          "node": "loop",
+          "state": "flash",
+          "at": 3300,
+          "until": 4000
+        },
+        {
+          "node": "loop",
+          "state": "failed",
+          "at": 5200
+        }
+      ],
+      "say": "最上面这圈Cordis，是所有插件的底座。官方原话：连agent loop都是插件，没有一块特权核心可以打补丁。最值钱的是依赖：驱动只声明我要六种能力，谁来提供由配置决定。工具服务下线，驱动自动卸载；回来了，自动装回。有个坑我在源码里核过：组件自己出错，依赖回来它也不会自愈，得手动恢复。"
+    },
+    {
+      "key": "状态归属",
+      "title": "出了 bad case：[先查归谁管]",
+      "inset": "owner",
+      "say": "讲完模块，给你一张出了bad case能直接用的表：每份状态归谁管。客户那边出了问题，先问一句，这段状态归谁？再看右边这列最常见的坑：调度不等于外部事务，原始日志不等于给模型的历史，写进内存不等于已经落盘。owner画清楚，排查就有了起点。"
+    },
+    {
+      "key": "走一圈",
+      "title": "连起来：一次运转[走一圈]",
+      "edges": "all",
+      "trace": [
+        {
+          "edge": "e_llm",
+          "label": "请求",
+          "dur": 1300
+        },
+        {
+          "edge": "e_llm",
+          "label": "回复",
+          "rev": true,
+          "dur": 1300
+        },
+        {
+          "edge": "e_msg",
+          "label": "模型回复"
+        },
+        {
+          "edge": "e_tool",
+          "label": "工具调用"
+        },
+        {
+          "edge": "e_t1",
+          "dur": 500
+        },
+        {
+          "edge": "e_t2",
+          "dur": 500
+        },
+        {
+          "edge": "e_res",
+          "label": "工具结果"
+        },
+        {
+          "edge": "e_pick",
+          "label": "挑选"
+        },
+        {
+          "edge": "e_hist",
+          "dur": 500
+        },
+        {
+          "edge": "e_back",
+          "label": "历史",
+          "dur": 1400
+        }
+      ],
+      "say": "五个模块串起来走一圈：驱动组装请求，调模型，回复写进Session；有工具调用，就过工具系统三层，结果写回Session；再从Session重新生成下一步的历史，交回驱动。关键在最后一步：驱动自己不攒历史，每一步都从同一本账重新生成，这才是single source of truth真正的用法。"
+    },
+    {
+      "key": "二次开发",
+      "title": "基于 DeepSeek 二次开发：[三档]",
+      "inset": "tiers",
+      "say": "落到实操，基于DeepSeek Harness做二次开发有三档。最轻是改配置，不碰代码就能换组合。往上是换插件，把工具集、模型适配或者持久化换成你自己的。最重是换驱动，实现公共的Agent接口，替掉默认的循环。提醒一句：它还在早期，上生产先评估成熟度。"
+    }
+  ]
+}

@@ -1,0 +1,952 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; connect-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="ArchTalk · 架构讲图">
+<title>DeepSeek Harness：按模块拆开，Agent 到底怎么跑</title>
+<!-- ArchTalk · 架构讲图（by 心晴九天）。按 → / 空格 下一镜，← 上一镜，R 重播，C 口播字幕，H 隐藏图例，L 浅色，A 自动播放；?s=3 直达第 3 镜。 -->
+<!--
+MIT License
+
+Copyright (c) 2026 xiaoni zhou (心晴九天)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+# Third-party notices
+
+ArchTalk's visual style was inspired by Lanshu's animated architecture diagrams:
+https://github.com/cclank/lanshu-animated-architecture-diagram
+
+The upstream MIT notice is retained below. This notice does not imply endorsement.
+
+```text
+MIT License
+
+Copyright (c) 2026 Lanshu
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+-->
+<style>/* ArchTalk · 架构讲图 —— 样式。MIT License, (c) 2026 xiaoni zhou / 心晴九天. */
+:root{
+  --bg:#0e0f11; --ink:#ebe7df; --ink2:#a9a59c; --dim:#6f6c66; --panel:#121417; --grid:rgba(255,255,255,.055);
+  --blue:#6cb6ff; --amber:#f3b553; --mint:#6be0ae; --coral:#ff7268; --cfg:#b9b3a6; --violet:#b59cff;
+  --hand:"Hannotate SC","HanziPen SC","Kaiti SC","STKaiti","KaiTi",cursive;
+  --mono:"SF Mono","JetBrains Mono","Menlo",monospace;
+}
+.light{
+  --bg:#f6f3ec; --ink:#1f1f22; --ink2:#55524c; --dim:#9a968e; --panel:#fbf9f4; --grid:rgba(0,0,0,.07);
+  --blue:#1f6fd1; --amber:#c27a0e; --mint:#178a5a; --coral:#d23c32; --cfg:#77736a; --violet:#6b4fd1;
+}
+html,body{margin:0;width:100%;height:100%;background:#050506;overflow:hidden}
+body.light{background:#d9d5cc}
+#stage{position:fixed;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;background:var(--bg);overflow:hidden}
+#stage svg{position:absolute;left:0;top:0;display:block;width:1920px;height:1080px}
+#hud{pointer-events:none}
+text{fill:var(--ink)}
+.hand{font-family:var(--hand)}
+.mono{font-family:var(--mono)}
+.t-title{font-family:var(--hand);font-size:50px;fill:var(--ink)}
+.t-eyebrow{font-family:var(--mono);font-size:16px;letter-spacing:3px;fill:var(--ink2)}
+.t-mod{font-family:var(--hand);font-size:27px;fill:var(--ink)}
+.t-label{font-family:var(--mono);fill:var(--ink)}
+.t-sub{font-family:var(--hand);fill:var(--ink2)}
+.t-note{font-family:var(--hand);font-size:23px}
+.t-small{font-family:var(--hand);font-size:19px;fill:var(--ink2)}
+.t-elabel{font-family:var(--hand);font-size:17px}
+.stroke-main{fill:none;stroke:var(--ink);stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.stroke-ghost{fill:none;stroke:var(--ink);stroke-width:1.1;opacity:.45;stroke-linecap:round}
+/* 节点用实心底：从节点背后穿过的连线会被挡住，不压字 */
+.fill-node{fill:#141518}
+.light .fill-node{fill:#fffdf8}
+.frame .stroke-main{stroke:var(--ink2);stroke-width:1.7}
+.frame.outer .stroke-main{stroke-dasharray:10 9;stroke:var(--mint);opacity:.75}
+.dimmable{transition:opacity .7s ease}
+.dimmable.dim{opacity:.1}
+.dimmable.half{opacity:.32}
+.lit .stroke-main{stroke:var(--blue);filter:url(#soft);animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{stroke-opacity:.55}50%{stroke-opacity:1}}
+.edge{fill:none;stroke-width:2.2;opacity:0;transition:opacity .6s ease;stroke-linecap:round;stroke-linejoin:round}
+.edge.on{opacity:.8}
+.edge.call{stroke:var(--blue)} .edge.fact{stroke:var(--amber)} .edge.proj{stroke:var(--mint);stroke-dasharray:2 9;stroke-width:2.6}
+.edge.dep{stroke:var(--dim);stroke-dasharray:9 8} .edge.cfg{stroke:var(--cfg)} .edge.evt{stroke:var(--violet);stroke-dasharray:12 6}
+.edge.warn{stroke:var(--coral)!important;opacity:.95}
+.elabel{opacity:0;transition:opacity .6s ease}
+.elabel.on{opacity:1}
+.elabel rect{fill:var(--bg)}
+.note{opacity:0;transition:opacity .6s ease, transform .6s ease;transform:translateY(6px)}
+.note.on{opacity:1;transform:none}
+.note rect.bg{fill:var(--bg);opacity:.9}
+.inset{opacity:0;transition:opacity .55s ease}
+.inset.on{opacity:1}
+.inset .ibg{fill:var(--panel);stroke:var(--ink2);stroke-width:1.4}
+.chip rect{fill:rgba(255,255,255,.03);stroke:var(--ink2);stroke-width:1.4;transition:stroke .3s}
+.light .chip rect{fill:#fff}
+.chip.on rect{stroke:var(--blue);stroke-width:2.2;filter:url(#soft)}
+.chip.lock rect{stroke:var(--amber);stroke-dasharray:5 5}
+.chip.lock.on rect{stroke:var(--amber);stroke-dasharray:none;filter:url(#glow)}
+.chip.warn rect{stroke:var(--coral)!important}
+.chip.ok rect{stroke:var(--mint)!important;filter:url(#soft)}
+.chip.on text{fill:var(--ink)}
+.chip text{fill:var(--ink2)}
+.chip.gone{opacity:.18;transition:opacity .6s}
+.state-gone{opacity:.18!important}
+.node.failed .stroke-main{stroke:var(--coral)!important;filter:url(#soft)}
+.node.off .stroke-main{stroke:var(--dim)!important;stroke-dasharray:6 7}
+.node.flash .stroke-main{stroke:var(--mint)!important;filter:url(#glow)}
+.node.mount .stroke-main,.frame.mount .stroke-main{stroke:var(--mint)!important;filter:url(#glow)}
+.cell{transition:transform .5s ease, opacity .5s ease}
+.ghostcell{transition:opacity .25s}
+.bar{transition:width .2s linear}
+#hudinfo{transition:opacity .4s}
+#hudinfo.hide{opacity:0}
+.legend-pulse{animation:lp 1.6s ease-in-out infinite}
+@keyframes lp{0%,100%{opacity:.55}50%{opacity:1}}
+.ticker{opacity:0;transition:opacity .5s}
+.ticker.on{opacity:1}
+.pill rect{fill:var(--bg);stroke:var(--dim);stroke-width:1.3}
+.pill text{fill:var(--dim)}
+.pill.on rect{stroke:var(--blue);filter:url(#soft)}
+.pill.on text{fill:var(--ink)}
+.pill.done text{fill:var(--ink2)}
+.badge{opacity:0;transition:opacity .4s}
+.badges.on .badge{opacity:.55}
+.badges.on .badge.on{opacity:1}
+.badge circle{fill:var(--bg);stroke:var(--blue);stroke-width:2}
+.badge.on circle{filter:url(#glow);fill:var(--blue)}
+.badge.on text{fill:var(--bg)}
+.pkt rect{fill:var(--bg);stroke-width:1.2}
+.pkt text{font-family:var(--mono);font-size:14px}
+.row{opacity:0;transition:opacity .5s}
+.row.on{opacity:1}
+.fade{opacity:0;transition:opacity .5s}
+.fade.on{opacity:1}
+#cap{position:absolute;left:160px;right:160px;bottom:84px;padding:18px 28px;border-radius:14px;background:rgba(8,9,11,.82);color:#f2efe8;font:30px/1.5 "PingFang SC","Hiragino Sans GB",sans-serif;opacity:0;transition:opacity .3s;pointer-events:none}
+#cap.on{opacity:1}
+.light #cap{background:rgba(255,255,255,.9);color:#1f1f22}
+</style>
+</head>
+<body>
+<div id="stage">
+  <svg id="world" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg"></svg>
+  <svg id="hud" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+<script>/* ArchTalk · 架构讲图 —— 绘图引擎。MIT License, (c) 2026 xiaoni zhou / 心晴九天.
+   页面结构：<div id="stage"><svg id="world"></svg><svg id="hud"></svg></div>
+   由 archtalk-runtime.js 根据场景描述调用；一般不用直接写。
+   键位：→ / 空格 下一镜；← 上一镜；R 重播；H 隐藏图例；L 浅色；A 自动播放；C 口播字幕。?s=5 直达第 5 镜。 */
+(function(){
+'use strict';
+const NS='http://www.w3.org/2000/svg';
+const DA=window.DA={};
+let world,hudsvg,L={},H={},defs;
+function el(tag,attrs={},parent){const e=document.createElementNS(NS,tag);for(const k in attrs){if(attrs[k]!=null)e.setAttribute(k,attrs[k])}if(parent)parent.appendChild(e);return e}
+function text(parent,x,y,s,cls,attrs={}){
+  const t=el('text',{x,y,class:cls,...attrs},parent);
+  const lines=String(s).split('\n');
+  if(lines.length===1){t.textContent=s;return t}
+  lines.forEach((ln,i)=>{const sp=el('tspan',{x,dy:i?'1.35em':0},t);sp.textContent=ln});
+  return t;
+}
+function hash(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0}
+function rng(seed){let a=seed||1;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function roughD(x,y,w,h,seed,amp=1.5){
+  const r=rng(seed),j=()=>(r()-.5)*2*amp,R=Math.min(16,h/3.2,w/6),f=v=>v.toFixed(1),P=(a,b)=>`${f(a)},${f(b)}`;
+  let d=`M${P(x+R+j(),y+j())}`;
+  d+=` Q${P(x+w/2+j(),y+j()*1.6)} ${P(x+w-R+j(),y+j())}`;
+  d+=` Q${P(x+w+j()*.5,y+j()*.5)} ${P(x+w+j(),y+R+j())}`;
+  d+=` Q${P(x+w+j()*1.6,y+h/2+j())} ${P(x+w+j(),y+h-R+j())}`;
+  d+=` Q${P(x+w+j()*.5,y+h+j()*.5)} ${P(x+w-R+j(),y+h+j())}`;
+  d+=` Q${P(x+w/2+j(),y+h+j()*1.6)} ${P(x+R+j(),y+h+j())}`;
+  d+=` Q${P(x+j()*.5,y+h+j()*.5)} ${P(x+j(),y+h-R+j())}`;
+  d+=` Q${P(x+j()*1.6,y+h/2+j())} ${P(x+j(),y+R+j())}`;
+  d+=` Q${P(x+j()*.5,y+j()*.5)} ${P(x+R+j()+2,y+j())}`;
+  return d;
+}
+function roughBox(parent,x,y,w,h,id,fill=true){
+  const g=el('g',{},parent);
+  if(fill) el('rect',{x,y,width:w,height:h,rx:12,class:'fill-node'},g);
+  el('path',{d:roughD(x,y,w,h,hash(id)),class:'stroke-main draw'},g);
+  el('path',{d:roughD(x+.8,y-.6,w,h,hash(id+'#2'),2.2),class:'stroke-ghost draw'},g);
+  return g;
+}
+const MK={call:'blue',fact:'amber',proj:'mint',dep:'dim',cfg:'cfg',evt:'violet'};
+const E={},N={},I={},nodes={},frames={},outerTabs=[];
+let eyebrow,titleG,counter,legend,info,vig,ticker,pills=[],badgeG,badges=[],brand='';
+const onReset=[];
+
+DA.init=function(opt={}){
+  brand=opt.brand||'';
+  world=document.getElementById('world');hudsvg=document.getElementById('hud');
+  defs=el('defs',{},world);
+  defs.innerHTML=`
+<filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0"/></filter>
+<pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" style="fill:var(--grid)"/></pattern>
+<radialGradient id="vig" cx="50%" cy="48%" r="75%"><stop offset="60%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity=".55"/></radialGradient>
+<linearGradient id="topfade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--bg);stop-opacity:1"/><stop offset=".72" style="stop-color:var(--bg);stop-opacity:.92"/><stop offset="1" style="stop-color:var(--bg);stop-opacity:0"/></linearGradient>
+<linearGradient id="botfade" x1="0" y1="1" x2="0" y2="0"><stop offset="0" style="stop-color:var(--bg);stop-opacity:1"/><stop offset=".6" style="stop-color:var(--bg);stop-opacity:.9"/><stop offset="1" style="stop-color:var(--bg);stop-opacity:0"/></linearGradient>`;
+  ['blue','amber','mint','dim','cfg','coral','violet'].forEach(c=>{
+    defs.insertAdjacentHTML('beforeend',`<marker id="ar-${c}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1,1.2 L9,5 L1,8.8" fill="none" style="stroke:var(--${c})" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>`);
+  });
+  el('rect',{x:-2000,y:-2000,width:6000,height:6000,fill:'url(#dots)'},world);
+  ['frames','edges','nodes','elabels','notes','badges','particles'].forEach(k=>L[k]=el('g',{id:'L-'+k},world));
+  ['fade','header','insets','info','fx'].forEach(k=>H[k]=el('g',{id:'H-'+k},hudsvg));
+  el('rect',{x:0,y:0,width:1920,height:150,fill:'url(#topfade)'},H.fade);
+  el('rect',{x:0,y:1022,width:1920,height:58,fill:'url(#botfade)'},H.fade);
+  vig=el('rect',{width:1920,height:1080,fill:'url(#vig)'},H.fx);
+  el('rect',{width:1920,height:1080,filter:'url(#grain)',style:'mix-blend-mode:overlay',opacity:.9},H.fx);
+  eyebrow=text(H.header,120,54,'','t-eyebrow');
+  titleG=el('g',{},H.header);
+  if(opt.mark) text(H.header,1800,1062,opt.mark,'hand',{'text-anchor':'end','font-size':28,style:'fill:var(--ink2)'});
+  info=el('g',{id:'hudinfo'},H.info);
+  counter=text(info,1640,1062,'','mono',{'text-anchor':'end','font-size':15,style:'fill:var(--dim)'});
+  legend=el('g',{},info);
+  (opt.legend||[['call','调用'],['fact','写入事实'],['proj','投影 / 读取'],['dep','依赖'],['evt','事件 / 通知']]).forEach(([t,s],i)=>{
+    const x=120+i*200;
+    el('path',{d:`M${x},1056 L${x+46},1056`,class:`edge ${t} on`,style:'opacity:.9'},legend);
+    text(legend,x+58,1062,s,'t-small');
+  });
+  badgeG=el('g',{class:'badges'},L.badges);
+  ticker=el('g',{class:'ticker'},H.insets);
+};
+function setTitle(s){
+  titleG.innerHTML='';
+  const parts=s.split(/(\[[^\]]+\])/).filter(Boolean);let x=120;
+  parts.forEach(p=>{
+    const hi=p.startsWith('[');const str=hi?p.slice(1,-1):p;
+    if(hi){
+      const g=el('g',{},titleG);const r=el('rect',{y:68,height:62,rx:31,style:'fill:var(--mint);fill-opacity:.16;stroke:var(--mint);stroke-width:2'},g);
+      const t=text(g,x+20,114,str,'t-title',{style:'fill:var(--mint)'});const w=t.getComputedTextLength();
+      r.setAttribute('x',x+4);r.setAttribute('width',w+32);x+=w+44;
+    }else{const t=text(titleG,x,114,str,'t-title');x+=t.getComputedTextLength()+4}
+  });
+}
+DA.frame=function(id,x,y,w,h,label,keys,cls=''){
+  const g=el('g',{class:`frame dimmable ${cls}`,'data-k':keys,id:'f-'+id},L.frames);
+  roughBox(g,x,y,w,h,id,false);
+  if(label) text(g,x+22,y+34,label,'t-mod');
+  frames[id]={g,x,y,w,h};return g;
+};
+/* 外框：虚线大框，标签压在上边线 */
+DA.outer=function(id,x,y,w,h,label,keys,color='mint'){
+  const g=DA.frame(id,x,y,w,h,'',keys,'outer');
+  const t=el('g',{class:'dimmable','data-k':keys},L.frames);
+  const lab=text(t,x+28,y+10,label,'t-mod',{style:`fill:var(--${color})`});
+  t._fit=()=>{const b=lab.getBBox();const r=el('rect',{x:b.x-12,y:b.y-2,width:b.width+24,height:b.height+4,style:'fill:var(--bg)'});t.insertBefore(r,lab)};
+  outerTabs.push(t);return g;
+};
+DA.node=function(id,x,y,w,h,label,sub,keys,size=24){
+  const g=el('g',{class:'node dimmable','data-k':keys+' '+id,id:'n-'+id},L.nodes);
+  roughBox(g,x,y,w,h,id);
+  const big=h>=80;
+  text(g,x+w/2,y+(sub?(big?h*.44:h*.45):h*.6),label,'t-label',{'text-anchor':'middle','font-size':size});
+  if(sub) text(g,x+w/2,y+(big?h*.76:h*.82),sub,'t-sub',{'text-anchor':'middle','font-size':big?19:16});
+  nodes[id]={g,x,y,w,h};return g;
+};
+DA.edge=function(id,d,type,label,lp=.5,dx=0,dy=-12){
+  const p=el('path',{d,class:`edge ${type}`,id:'e-'+id,'marker-end':`url(#ar-${MK[type]})`},L.edges);
+  let lab=null;
+  if(label){
+    lab=el('g',{class:'elabel'},L.elabels);
+    const len=p.getTotalLength(),pt=p.getPointAtLength(len*lp);
+    const bg=el('rect',{rx:6},lab);
+    const t=text(lab,pt.x+dx,pt.y+dy,label,'t-elabel',{'text-anchor':'middle',style:`fill:var(--${MK[type]==='dim'?'ink2':MK[type]})`});
+    lab._fit=()=>{const b=t.getBBox();bg.setAttribute('x',b.x-6);bg.setAttribute('y',b.y-2);bg.setAttribute('width',b.width+12);bg.setAttribute('height',b.height+4)};
+  }
+  E[id]={p,type,lab,len:p.getTotalLength()};return p;
+};
+DA.note=function(id,x,y,s,color='amber',size=23,anchor='start'){
+  const g=el('g',{class:'note',id:'note-'+id},L.notes);
+  const bg=el('rect',{class:'bg',rx:8},g);
+  const t=text(g,x,y,s,'t-note',{style:`fill:var(--${color})`,'font-size':size,'text-anchor':anchor});
+  g._fit=()=>{const b=t.getBBox();bg.setAttribute('x',b.x-10);bg.setAttribute('y',b.y-6);bg.setAttribute('width',b.width+20);bg.setAttribute('height',b.height+12)};
+  N[id]=g;return g;
+};
+DA.inset=function(id,x,y,w,h,ttl){
+  const g=el('g',{class:'inset',id:'inset-'+id},H.insets);
+  el('rect',{x,y,width:w,height:h,rx:16,class:'ibg'},g);
+  el('path',{d:roughD(x,y,w,h,hash(id),1.2),class:'stroke-ghost'},g);
+  if(ttl) text(g,x+28,y+46,ttl,'hand',{'font-size':30});
+  I[id]=g;return g;
+};
+DA.chip=function(parent,x,y,w,h,s,id,size=19,cls=''){
+  const g=el('g',{class:'chip '+cls},parent);
+  if(id) g.id=id;
+  el('rect',{x,y,width:w,height:h,rx:10},g);
+  text(g,x+w/2,y+h/2+size*.36,s,'mono',{'text-anchor':'middle','font-size':size});
+  return g;
+};
+DA.arrow=function(parent,d,color='ink2',dash=null){
+  return el('path',{d,fill:'none',style:`stroke:var(--${color})`,'stroke-width':2,'stroke-linecap':'round','stroke-dasharray':dash||'none','marker-end':`url(#ar-${color==='ink2'?'dim':color})`},parent);
+};
+/* 状态归属表：rows = [[tag,color,module,owns,boundary],...] */
+DA.ownerTable=function(id,rows,opt={}){
+  const x=opt.x||150,y=opt.y||150,w=opt.w||1620,rh=opt.rh||Math.min(96,Math.floor((866-90)/rows.length));
+  const g=DA.inset(id,x,y,w,90+rows.length*rh,'');
+  const c1=x+32,c2=x+90,c3=x+(opt.c3||480),c4=x+(opt.c4||1040);
+  text(g,c1,y+54,'模块','hand',{'font-size':22,style:'fill:var(--ink2)'});
+  text(g,c3,y+54,'它拥有的状态','hand',{'font-size':22,style:'fill:var(--ink2)'});
+  text(g,c4,y+54,'不能混的边界','hand',{'font-size':22,style:'fill:var(--ink2)'});
+  rows.forEach(([n,col,m,own,bd],i)=>{
+    const yy=y+76+i*rh;
+    const r=el('g',{class:'row',id:`${id}-${i}`},g);
+    el('line',{x1:x+24,x2:x+w-24,y1:yy,y2:yy,style:'stroke:var(--dim);stroke-opacity:.35'},r);
+    const by=yy+rh*.62;
+    text(r,c1,by+2,n,'hand',{'font-size':28,style:`fill:var(--${col})`});
+    text(r,c2,by,m,'mono',{'font-size':opt.ms||23});
+    text(r,c3,by,own,'hand',{'font-size':opt.fs||22});
+    text(r,c4,by,bd,'hand',{'font-size':opt.fs||22,style:'fill:var(--amber)'});
+  });
+  return g;
+};
+DA.revealRows=function(id,n,step=600,start=300){for(let i=0;i<n;i++) after(start+i*step,()=>cls(`${id}-${i}`,'on',true))};
+DA.setTicker=function(labels,opt={}){
+  const x0=opt.x||990,y=opt.y||232,w=opt.w||152,gap=opt.gap||12;
+  pills=labels.map((s,i)=>{
+    const g=el('g',{class:'pill'},ticker);
+    el('rect',{x:x0+i*(w+gap),y,width:w,height:36,rx:18},g);
+    text(g,x0+i*(w+gap)+w/2,y+25,s,'hand',{'text-anchor':'middle','font-size':opt.size||18});
+    return g;
+  });
+};
+DA.setBadges=function(pts){
+  badges=pts.map(([x,y],i)=>{
+    const g=el('g',{class:'badge'},badgeG);
+    el('circle',{cx:x,cy:y,r:16},g);
+    text(g,x,y+6,String(i+1),'mono',{'text-anchor':'middle','font-size':17,'font-weight':700});
+    return g;
+  });
+};
+DA.step=function(i){pills.forEach((p,k)=>{p.classList.toggle('on',k===i);p.classList.toggle('done',k<i)});badges.forEach((b,k)=>b.classList.toggle('on',k===i))};
+
+/* ---------- particles ---------- */
+let parts=[],paused=false;
+const COL={call:'blue',fact:'amber',proj:'mint',dep:'dim',cfg:'cfg',evt:'violet'};
+function spawn(eid,o={}){
+  const e=typeof eid==='string'?E[eid]:eid; if(!e) return;
+  const color=o.color||COL[e.type];
+  const g=el('g',{},L.particles);
+  const dots=el('g',{filter:'url(#glow)'},g);
+  const n=o.tail??5,size=o.size||5.5;
+  const cs=[];for(let i=0;i<=n;i++) cs.push(el('circle',{r:Math.max(1,size*(1-i/(n+1.5))),style:`fill:var(--${color})`,opacity:i?0.55*(1-i/(n+1)):1},dots));
+  let lab=null;
+  if(o.label){
+    lab=el('g',{class:'pkt'},g);
+    const r=el('rect',{rx:6,style:`stroke:var(--${color})`},lab);
+    const t=text(lab,0,0,o.label,'',{style:`fill:var(--${color})`});
+    const w=t.getComputedTextLength();r.setAttribute('x',-6);r.setAttribute('y',-15);r.setAttribute('width',w+12);r.setAttribute('height',21);
+    lab._dx=o.ldx??12;lab._dy=o.ldy??-12;
+  }
+  const p={e,g,cs,lab,t0:performance.now()+(o.delay||0),dur:o.dur||1800,loop:!!o.loop,gap:o.gap??.35,rev:!!o.rev,ease:o.ease||'lin',onDone:o.onDone,dead:false};
+  g.style.opacity=0;parts.push(p);return p;
+}
+function clearParts(){parts.forEach(p=>p.g.remove());parts=[]}
+const ez={lin:t=>t,io:t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2};
+const FULL=[0,0,1920,1080];
+const SHOT=new URLSearchParams(location.search).get('shot')==='1';
+let cam=FULL.slice(),camAnim=null;
+function camTo(r,ms=1100){if(ms<=0){cam=r.slice();camAnim=null;world.setAttribute('viewBox',cam.join(' '));return}camAnim={from:cam.slice(),to:r.slice(),t0:performance.now(),ms}}
+function frameLoop(now){
+  if(paused){requestAnimationFrame(frameLoop);return}
+  if(camAnim){const t=Math.min(1,(now-camAnim.t0)/camAnim.ms),e=ez.io(t);cam=camAnim.from.map((v,i)=>v+(camAnim.to[i]-v)*e);world.setAttribute('viewBox',cam.map(v=>v.toFixed(2)).join(' '));if(t>=1)camAnim=null}
+  for(const p of parts){
+    if(p.dead) continue;
+    let t=(now-p.t0)/p.dur;
+    if(t<0){p.g.style.opacity=0;continue}
+    if(t>1){
+      if(p.loop){p.t0+=p.dur*(1+p.gap);t=(now-p.t0)/p.dur;if(t<0){p.g.style.opacity=0;continue}}
+      else{p.dead=true;p.g.remove();p.onDone&&p.onDone();continue}
+    }
+    p.g.style.opacity=1;
+    let head=null;
+    p.cs.forEach((c,i)=>{
+      let tt=Math.max(0,ez[p.ease](t)-i*0.018);
+      if(p.rev) tt=1-tt;
+      const pt=p.e.p.getPointAtLength(p.e.len*tt);
+      if(!i) head=pt;
+      c.setAttribute('cx',pt.x);c.setAttribute('cy',pt.y);
+    });
+    if(p.lab&&head) p.lab.setAttribute('transform',`translate(${(head.x+p.lab._dx).toFixed(1)},${(head.y+p.lab._dy).toFixed(1)})`);
+  }
+  parts=parts.filter(p=>!p.dead);
+  requestAnimationFrame(frameLoop);
+}
+function flow(ids,o={}){ids.forEach(id=>{const k=o.count||2,d=o.dur||2200,gp=o.gap??.2;for(let i=0;i<k;i++) spawn(id,{loop:true,dur:d,gap:gp,delay:i*d*(1+gp)/k+(o.delay||0),size:o.size||5,tail:o.tail??5,color:o.color,label:(o.labels&&i===0)?o.labels[id]:null})})}
+/* 依次走一串边：chain([['e1',{label,pre,post}],['e2',{rev:true}]],done) */
+function chain(list,done){
+  const step=i=>{if(i>=list.length){done&&done();return}const [id,o={}]=list[i];o.pre&&o.pre();spawn(id,{ease:'io',size:7,dur:900,...o,onDone:()=>{o.post&&o.post();step(i+1)}})};
+  step(0);
+}
+
+/* ---------- timers & helpers ---------- */
+let timers=[];
+function after(ms,fn){timers.push(setTimeout(fn,ms))}
+function every(ms,fn){fn();timers.push(setInterval(fn,ms))}
+function clearTimers(){timers.forEach(t=>{clearTimeout(t);clearInterval(t)});timers=[]}
+const $=id=>document.getElementById(id);
+const cls=(id,c,on)=>{const e=typeof id==='string'?$(id):id;if(e)e.classList.toggle(c,on)};
+function flash(id,ms=700){cls(id,'flash',true);after(ms,()=>cls(id,'flash',false))}
+function bar(id,w,ms,x){const b=$(id);if(!b)return;if(x!=null)b.setAttribute('x',x);if(ms<=0){b.style.transition='none';b.setAttribute('width',w);return}b.getBoundingClientRect();b.style.transition=`width ${ms}ms linear`;b.setAttribute('width',w)}
+
+/* ---------- tape (append-only log) ---------- */
+let tape=null,tcfg=null,tapeSeq=0,tapeCells=[];
+DA.setTape=function(cfg){tcfg={x:650,y:692,w:58,gap:8,max:17,h:52,...cfg};tape=el('g',{class:'dimmable','data-k':cfg.keys||'',id:'tape'},L.nodes)};
+function tapePos(i,dy=0){return `translate(${tcfg.x+i*(tcfg.w+tcfg.gap)}px,${tcfg.y+dy}px)`}
+function tapeReset(){if(!tape)return;tape.innerHTML='';tapeCells=[];tapeSeq=0}
+function tapeAppend(kind,color,animate=true){
+  if(!tape)return;tapeSeq++;
+  const g=el('g',{class:'cell'},tape);
+  el('rect',{x:0,y:0,width:tcfg.w,height:tcfg.h,rx:8,style:`fill:var(--${color});fill-opacity:.16;stroke:var(--${color});stroke-width:1.6`},g);
+  text(g,tcfg.w/2,tcfg.h*.38,'#'+tapeSeq,'mono',{'text-anchor':'middle','font-size':12,style:'fill:var(--ink2)'});
+  text(g,tcfg.w/2,tcfg.h*.77,kind,'mono',{'text-anchor':'middle','font-size':13});
+  tapeCells.push(g);
+  if(tapeCells.length>tcfg.max){const old=tapeCells.shift();old.style.opacity=0;setTimeout(()=>old.remove(),500)}
+  tapeCells.forEach((c,i)=>{if(c!==g)c.style.transform=tapePos(i)});
+  const last=tapeCells.length-1;
+  if(!animate){g.style.transform=tapePos(last);return g}
+  g.style.transition='none';g.style.opacity=0;g.style.transform=tapePos(last,-22);
+  g.getBoundingClientRect();g.style.transition='';
+  requestAnimationFrame(()=>{g.style.opacity=1;g.style.transform=tapePos(last)});
+  return g;
+}
+function tapeSeed(list,n){for(let i=0;i<n;i++){const k=list[i%list.length];tapeAppend(k[0],k[1],false)}}
+
+/* ---------- scene engine ---------- */
+function drawIn(groups){
+  groups.forEach((keys,gi)=>{
+    document.querySelectorAll('#world .dimmable').forEach(d=>{
+      const k=(d.dataset.k||'').split(' ');
+      if(!keys.some(x=>k.includes(x))) return;
+      d.querySelectorAll('.draw').forEach(p=>{
+        const len=p.getTotalLength();p.style.transition='none';p.style.strokeDasharray=len;p.style.strokeDashoffset=len;
+        p.getBoundingClientRect();
+        after(120+gi*600,()=>{p.style.transition='stroke-dashoffset 1.3s ease';p.style.strokeDashoffset=0});
+      });
+      d.querySelectorAll('text').forEach(t=>{t.style.transition='none';t.style.opacity=0;after(500+gi*600,()=>{t.style.transition='opacity .8s';t.style.opacity=1})});
+    });
+  });
+  after(groups.length*600+1700,undraw);
+}
+function undraw(){document.querySelectorAll('.draw').forEach(p=>{p.style.transition='none';p.style.strokeDasharray='';p.style.strokeDashoffset=''});document.querySelectorAll('#world .dimmable text').forEach(t=>{t.style.transition='';t.style.opacity=''})}
+function resetStates(){
+  document.querySelectorAll('.node,.frame').forEach(n=>n.classList.remove('failed','off','flash','mount','state-gone','lit'));
+  document.querySelectorAll('.chip').forEach(c=>{if(!c.classList.contains('keep'))c.classList.remove('on','gone','ok','warn')});
+  document.querySelectorAll('.edge').forEach(e=>e.classList.remove('warn'));
+  document.querySelectorAll('.row,.fade').forEach(r=>{if(!r.classList.contains('keep'))r.classList.remove('on')});
+  pills.forEach(p=>p.classList.remove('on','done'));
+  badges.forEach(b=>b.classList.remove('on'));
+  onReset.forEach(f=>f());
+}
+DA.onReset=f=>onReset.push(f);
+let S=[],cur=-1,auto=null,ALL=[];
+function keysOf(e){return (e.dataset.k||'').split(' ').filter(Boolean)}
+function go(i,replay=false){
+  i=Math.max(0,Math.min(S.length-1,i));
+  if(i===cur&&!replay) return;
+  clearTimers();clearParts();resetStates();undraw();
+  cur=i;const s=S[i];
+  history.replaceState(null,'',`?s=${i+1}`);
+  eyebrow.textContent=`${brand?brand+' · ':''}${String(i+1).padStart(2,'0')} / ${S.length} · ${s.k}`;
+  DA.onScene&&DA.onScene(i,s);
+  setTitle(s.t);
+  counter.textContent=`${String(i+1).padStart(2,'0')} / ${S.length}   ← →`;
+  const focus=s.focus||ALL,half=s.half||[];
+  document.querySelectorAll('#world .dimmable').forEach(d=>{
+    const k=keysOf(d);
+    const f=k.some(x=>focus.includes(x)),h=!f&&k.some(x=>half.includes(x));
+    d.classList.toggle('dim',!f&&!h);d.classList.toggle('half',h);
+  });
+  (s.lit||[]).forEach(id=>{const e=$('f-'+id)||$('n-'+id);if(e)e.classList.add('lit')});
+  for(const id in E){const on=(s.edges||[]).includes(id);E[id].p.classList.toggle('on',on);if(E[id].lab)E[id].lab.classList.toggle('on',on)}
+  for(const id in N) N[id].classList.toggle('on',(s.notes||[]).includes(id));
+  for(const id in I) I[id].classList.toggle('on',(s.insets||[]).includes(id));
+  ticker.classList.toggle('on',!!s.ticker);
+  badgeG.classList.toggle('on',!!s.badges);
+  legend.classList.toggle('legend-pulse',!!s.legend);
+  if(!s.keepTape) tapeReset();
+  camTo(s.cam||FULL,SHOT?0:900);
+  s.enter&&s.enter();
+}
+function fit(){const st=document.getElementById('stage');const sc=Math.min(innerWidth/1920,innerHeight/1080);st.style.transform=`translate(${(innerWidth-1920*sc)/2}px,${(innerHeight-1080*sc)/2}px) scale(${sc})`}
+DA.start=function(scenes,all){
+  S=scenes;ALL=all;
+  addEventListener('resize',fit);fit();
+  addEventListener('keydown',e=>{
+    if(['ArrowRight',' ','PageDown','Enter'].includes(e.key)){e.preventDefault();go(cur+1)}
+    else if(['ArrowLeft','PageUp','Backspace'].includes(e.key)){e.preventDefault();go(cur-1)}
+    else if(e.key==='Home') go(0); else if(e.key==='End') go(S.length-1);
+    else if(e.key==='r'||e.key==='R') go(cur,true);
+    else if(e.key==='h'||e.key==='H') info.classList.toggle('hide');
+    else if(e.key==='l'||e.key==='L'){document.body.classList.toggle('light');document.getElementById('stage').classList.toggle('light');vig.style.display=document.body.classList.contains('light')?'none':''}
+    else if(e.key==='a'||e.key==='A'){if(auto){clearInterval(auto);auto=null}else auto=setInterval(()=>go(cur+1>=S.length?0:cur+1),14000)}
+    else DA.onKey&&DA.onKey(e);
+  });
+  addEventListener('click',()=>go(cur+1));
+  window.__go=i=>{paused=false;document.getAnimations().forEach(a=>a.play());go(i,true)};window.__S=S;
+  window.__freeze=()=>{clearTimers();paused=true;document.getAnimations().forEach(a=>a.pause())};
+  requestAnimationFrame(frameLoop);
+  (document.fonts?document.fonts.ready:Promise.resolve()).then(()=>{
+    for(const id in E) E[id].lab&&E[id].lab._fit();
+    for(const id in N) N[id]._fit();
+    outerTabs.forEach(t=>t._fit());
+    const q=new URLSearchParams(location.search);const s0=+(q.get('s')||1)-1;
+    if(DA.beforeFirst&&DA.beforeFirst()===false) return;
+    go(isNaN(s0)?0:s0);
+  });
+};
+DA.go=go;
+Object.assign(DA,{el,text,roughD,hash,spawn,flow,chain,clearParts,camTo,FULL,after,every,clearTimers,$,cls,flash,bar,tapeAppend,tapeReset,tapeSeed,drawIn,E,N,I,nodes,frames,H,L});
+})();
+</script>
+<script>window.ARCHTALK_SPEC={"title":"DeepSeek Harness：按模块拆开，Agent 到底怎么跑","eyebrow":"ARCHTALK 示例 · DEEPSEEK HARNESS · 8bd0733","brand":"心晴九天","lang":"zh-CN","legend":["call","fact","proj","dep"],"terms":["DeepSeek"],"sources":["deepseek-ai/deepseek-harness@8bd073392eef6f54e921a093b95076248eb08cbb（2026-11-03）","docs/architecture.md：Every part of the product is a plugin…；Model-visible means logged…；Fork, resume, transcripts… derive from these durable settlements"],"layout":{"rows":[{"h":0.6,"modules":[{"id":"cordis","label":"Cordis 骨架 · 所有插件的底座","style":"outer","nodes":[{"id":"assemble","label":"装配","sub":"配置合成插件树"},{"id":"deps","label":"依赖","sub":"谁提供能力由配置定"},{"id":"exit","label":"退出","sub":"先停驱动，再放资源"}],"nodeH":64}]},{"h":1,"modules":[{"id":"drv","label":"驱动核心","span":0.9,"dir":"col","nodes":[{"id":"registry","label":"公共接口","sub":"插件只认这一层"},{"id":"loop","label":"默认驱动","sub":"推着 Agent 一步步干活"}],"gap":12},{"id":"tools","label":"工具系统 · Function Call 落地","span":2.1,"nodes":[{"id":"tdef","label":"定义层","sub":"有哪些 · 谁能看见"},{"id":"tcall","label":"调用层","sub":"怎么交给模型"},{"id":"texec","label":"执行层","sub":"审批 · 安全检查"}]},{"id":"llm","label":"模型","span":0.7,"nodes":[{"id":"adapter","label":"模型适配器","sub":"可以热替换"}]}]},{"h":0.72,"modules":[{"id":"session","label":"Session","nodes":[{"id":"log","label":"只追加、不改写的一本账","sub":"所有事实都记在这里","w":1.2},{"spacer":true,"w":1}],"nodeH":72}]},{"h":0.8,"modules":[{"id":"hist","label":"历史与存储","nodes":[{"id":"pick","label":"挑选","sub":"模型该看什么"},{"id":"history","label":"模型历史","sub":"每一步现生成"},{"id":"views","label":"业务视图","sub":"各模块自己的"},{"id":"write","label":"写文件","sub":"按会话排队"},{"id":"flush","label":"刷盘","sub":"成功才算存住"}]}]}]},"edges":[{"id":"e_llm","from":"loop","to":"adapter","type":"call","label":"调用模型","dir":"h","bend":-150},{"id":"e_tool","from":"loop","to":"tdef","type":"call","label":"执行工具"},{"id":"e_t1","from":"tdef","to":"tcall","type":"call"},{"id":"e_t2","from":"tcall","to":"texec","type":"call"},{"id":"e_res","from":"texec","to":"log","type":"fact","label":"工具结果"},{"id":"e_msg","from":"loop","to":"log","type":"fact","label":"模型回复"},{"id":"e_pick","from":"log","to":"pick","type":"proj"},{"id":"e_hist","from":"pick","to":"history","type":"proj"},{"id":"e_back","from":"history","to":"loop","type":"proj","dir":"v"},{"id":"e_views","from":"log","to":"views","type":"proj","label":"投影"},{"id":"e_write","from":"log","to":"write","type":"fact"},{"id":"e_flush","from":"write","to":"flush","type":"fact"},{"id":"e_dep","from":"deps","to":"loop","type":"dep","dir":"v"}],"insets":[{"id":"hook","type":"text","place":"full","hero":true,"lines":[{"text":"Agent 的默认推进循环，也可以是一个可替换的插件","color":"mint"},{"text":"DeepSeek Harness 用同一套插件机制装配模型、工具、会话和默认驱动","color":"amber"},{"text":"懂这些交接点，才能替换插件、二次开发、排查 bad case","color":"blue"},{"text":"本示例按固定版本源码讲解；不代表其他框架或后续版本的行为","color":"ink2"}]},{"id":"locks","type":"steps","place":"bottom","title":"一次请求，过两道锁","steps":["领取输入",{"label":"锁① 模型 + 工具快照","lock":true},"组装提示词",{"label":"锁② 绑定适配器","lock":true},"记进 Session","发出"],"lines":[{"text":"为什么锁：准备请求是异步的，中途工具可能卸掉、适配器可能热替换","color":"amber"},{"text":"好处：重试不会把用户的话再吃一遍；代价：插件在请求阶段能改的变少","color":"ink2"}]},{"id":"race","type":"race","place":"center","title":"一批工具调用：一起跑，按模型的顺序进历史","tasks":[{"label":"#1 可并发","len":0.62},{"label":"#2 可并发","len":0.17},{"label":"#3 可并发","len":0.26},{"label":"#4 独占","len":0.2,"exclusive":true}],"footer":"前面一个慢，后面跑完的也得等：换来稳定的顺序，代价是队头等待"},{"id":"memory","type":"text","place":"center","title":"那记忆呢？","lines":[{"text":"这版源码里没有单独的长期记忆模块","color":"amber"},{"text":"能做的是 resume 和 fork：重新打开存下的会话，或者分叉出一个新会话","color":"blue"},{"text":"跨对话记忆要自己写插件；召回的内容要喂给模型，也得先记进 Session","color":"mint"}]},{"id":"deplife","type":"steps","place":"bottom","title":"依赖走了跟着下线，回来了自动装回","steps":["工具服务下线","驱动自动卸载","工具服务回来","驱动自动装回",{"label":"例外：出错不自愈","lock":true}],"lines":[{"text":"组件自己出错进了失败状态，依赖回来也不会自己好，得手动恢复","color":"amber"},{"text":"契约定得松，复杂度会摊给每个实现方；插件化买到的是可维护性","color":"ink2"}]},{"id":"owner","type":"table","place":"full","title":"出了 bad case，先查这段状态归谁管","columns":["模块","它管的状态","最常见的坑"],"widths":[0.9,1.5,1.6],"rows":[["骨架","服务绑定 · 依赖","调度不等于外部事务"],["驱动","活跃的 Agent · 每一步的推进","插件只碰公共接口"],["待处理输入","下一轮、下一步的输入队列","已经领取的输入改不了"],["工具层","定义 · 准入","注册了不等于模型看得见"],["Session","已经提交的事实","原始日志不等于给模型的历史"],["存储层","写入队列 · 刷盘","写进内存不等于已经落盘"]]},{"id":"tiers","type":"cards","place":"full","title":"基于 DeepSeek Harness 做二次开发：三档","items":[{"head":"轻 · 改配置","text":"换预设，按插件包、预设、用户目录、命令行四层覆盖，不碰代码就能换组合"},{"head":"中 · 换插件","text":"按依赖契约写一个插件包，把工具集、模型适配或持久化换成自己的"},{"head":"重 · 换驱动","text":"实现公共的 Agent 接口，替掉默认循环；只认公共接口的插件照样能用"}],"footer":"提醒：还在早期，上生产先评估成熟度 · 契约要定严 · 组件出错不会自己恢复 · 退出顺序自己写清"}],"scenes":[{"key":"钩子","title":"连 [Agent 循环] 都能替换的 Harness","inset":"hook","say":"一个Agent框架里，连负责一轮轮推进的循环本身，也可以是插件。DeepSeek Harness的架构文档明确写着：模型适配、工具注册、会话日志和默认驱动，都按插件装配，可以从配置替换。今天就沿着这几个交接点拆开看：谁去调模型，工具怎么执行，什么内容进会话，插件卸载时又怎么收尾。你要换一套工具、接自己的存储，或者排查一次没达到预期的运行，都得先知道状态和责任落在哪里。这里讲的是固定版本的实现。"},{"key":"全景","title":"先看地图：[五个模块]","draw":true,"say":"先看地图，五个模块。谁去调模型：驱动核心。Function Call怎么落地：工具系统。上下文怎么维护、记忆怎么存：Session和历史与存储。插件从哪接进来：最上面这圈Cordis骨架。每个模块只讲四件事：管什么，跟谁交接，为什么这么切，代价是什么。"},{"key":"驱动","title":"谁去调模型：[驱动核心]和两道锁","show":["drv","llm"],"lit":["loop"],"inset":"locks","flow":[{"edge":"e_llm","label":"请求"}],"say":"驱动核心分两层：对外一个公共接口，里面一个默认实现，推着Agent一步一步干活。插件只认公共接口，所以整套驱动换掉，生态不用跟着改。驱动每次调模型，要过两道锁：先把用哪个模型、准用哪些工具拍个快照，再把请求绑到当前这一版的模型适配器上。准备请求是异步的，不锁的话，模型看到的工具清单和真正发出去的请求可能对不上。"},{"key":"工具系统","title":"Function Call 落地：[工具系统三层]","show":["drv","tools","session"],"zoom":["drv","tools","session"],"trace":[{"edge":"e_tool","label":"调用"},{"edge":"e_t1"},{"edge":"e_t2"},{"edge":"e_res","label":"工具结果"}],"notes":[{"at":"tools","pos":"above","text":"声明和执行由同一层负责：不会告诉模型一套、实际执行另一套","color":"amber","size":20}],"say":"模型说要调工具，接下来就是工具系统，Function Call真正落地的地方。它拆成三层：一层管有哪些工具、谁能看见、准不准用；一层管怎么把工具交给模型；最后一层管执行规矩：审批、安全检查、结果整理。协议变了只动中间那层，规矩变了只动最后一层。"},{"key":"并发","title":"一起跑，但[按模型的顺序]进历史","show":["tools"],"lit":["texec"],"inset":"race","say":"模型一次常常要调好几个工具。标了可以并发的，放进一个有上限的池子一起跑，其余的一个个来。跑可以一起跑，写进历史必须按模型发起的顺序：二号、三号先跑完了，也得等一号。全串行最好排查但慢，谁先跑完谁先写最快但顺序乱。它取中间，代价是队头等待，行话叫head-of-line blocking。"},{"key":"Session","title":"所有事实，只记[一本账]","show":["session","drv","tools"],"lit":["log"],"flow":[{"edge":"e_msg","label":"模型回复"},{"edge":"e_res","label":"工具结果"}],"notes":[{"at":"log","pos":"right","text":"硬规矩：模型能看到的东西，\n必须先记进这本账","color":"amber","size":21}],"say":"工具结果、模型回复，最后都写进同一个地方：Session，一本只追加、不改写的账，行话叫single source of truth。模型、界面、存储都想知道发生了什么，各记一份迟早对不上。官方还定了一条硬规矩：模型能看到的东西，必须先记进这本账。你想给模型塞一段额外的上下文，也得先写成Session里的一条记录。"},{"key":"历史与存储","title":"上下文怎么维护：[一本账，两条路]","show":["session","hist","drv"],"lit":["hist"],"flow":[{"edge":"e_pick","label":"该看的部分"},{"edge":"e_hist"},{"edge":"e_back","label":"下一步的历史"},{"edge":"e_views"},{"edge":"e_write","label":"会话事件"},{"edge":"e_flush"}],"states":[{"node":"flush","state":"off","at":600,"until":1800},{"node":"flush","state":"flash","at":1800,"until":2600}],"say":"上下文怎么维护？这一层把一本账分成两条路。一条给模型：每一步都从账里挑出该看的部分，现生成一份历史，驱动自己不攒历史。另一条给磁盘：按会话排队写文件，刷盘成功才算真存住，所以告诉用户已保存，必须等刷盘成功。"},{"key":"记忆","title":"那[记忆]呢？","inset":"memory","say":"再说记忆。在我读的这版源码里，没有一个单独的长期记忆模块。它能做的是resume和fork：把存下来的会话重新打开接着聊，或者分叉出一个新会话。跨对话的长期记忆，得你自己写插件，而且按刚才那条规矩，召回的记忆要喂给模型，也得先进Session。"},{"key":"Cordis","title":"插件从哪接：[Cordis 骨架]","show":["cordis","drv","tools"],"lit":["deps"],"inset":"deplife","edges":["e_dep"],"flow":[{"edge":"e_dep","label":"六种能力","count":1}],"states":[{"node":"tdef","state":"off","at":600,"until":2600},{"node":"loop","state":"off","at":1300,"until":3300},{"node":"loop","state":"flash","at":3300,"until":4000},{"node":"loop","state":"failed","at":5200}],"say":"最上面这圈Cordis，是所有插件的底座。官方原话：连agent loop都是插件，没有一块特权核心可以打补丁。最值钱的是依赖：驱动只声明我要六种能力，谁来提供由配置决定。工具服务下线，驱动自动卸载；回来了，自动装回。有个坑我在源码里核过：组件自己出错，依赖回来它也不会自愈，得手动恢复。"},{"key":"状态归属","title":"出了 bad case：[先查归谁管]","inset":"owner","say":"讲完模块，给你一张出了bad case能直接用的表：每份状态归谁管。客户那边出了问题，先问一句，这段状态归谁？再看右边这列最常见的坑：调度不等于外部事务，原始日志不等于给模型的历史，写进内存不等于已经落盘。owner画清楚，排查就有了起点。"},{"key":"走一圈","title":"连起来：一次运转[走一圈]","edges":"all","trace":[{"edge":"e_llm","label":"请求","dur":1300},{"edge":"e_llm","label":"回复","rev":true,"dur":1300},{"edge":"e_msg","label":"模型回复"},{"edge":"e_tool","label":"工具调用"},{"edge":"e_t1","dur":500},{"edge":"e_t2","dur":500},{"edge":"e_res","label":"工具结果"},{"edge":"e_pick","label":"挑选"},{"edge":"e_hist","dur":500},{"edge":"e_back","label":"历史","dur":1400}],"say":"五个模块串起来走一圈：驱动组装请求，调模型，回复写进Session；有工具调用，就过工具系统三层，结果写回Session；再从Session重新生成下一步的历史，交回驱动。关键在最后一步：驱动自己不攒历史，每一步都从同一本账重新生成，这才是single source of truth真正的用法。"},{"key":"二次开发","title":"基于 DeepSeek 二次开发：[三档]","inset":"tiers","say":"落到实操，基于DeepSeek Harness做二次开发有三档。最轻是改配置，不碰代码就能换组合。往上是换插件，把工具集、模型适配或者持久化换成你自己的。最重是换驱动，实现公共的Agent接口，替掉默认的循环。提醒一句：它还在早期，上生产先评估成熟度。"}]};</script>
+<script>/* ArchTalk · 架构讲图 —— 场景描述运行时。MIT License, (c) 2026 xiaoni zhou / 心晴九天.
+   读 window.ARCHTALK_SPEC（格式见 reference/spec.md），自动排版模块和节点、连线、注释、浮层，
+   再把每个镜头交给 engine.js 播放。?check=1 时不播放，只做版面自检并把结果写进 #archtalk-report。 */
+(function(){
+'use strict';
+const SPEC=window.ARCHTALK_SPEC;
+const {el,text,spawn,after,every,$,cls,flash,bar,camTo,FULL,E,N,I}=DA;
+const X0=90,X1=1830,Y0=230,Y1=1010;
+const LEGEND={call:'调用',fact:'写入事实',proj:'投影 / 读取',dep:'依赖',cfg:'配置',evt:'事件 / 通知'};
+const Q=new URLSearchParams(location.search);
+const CHECK=Q.get('check')==='1';
+// ?shot=1：截图用，关掉 CSS 过渡（无头浏览器的虚拟时间推不动过渡），状态变化立刻到位
+if(Q.get('shot')==='1'){const st=document.createElement('style');st.textContent='*{transition:none!important}';document.head.appendChild(st)}
+const issues=[];
+const warn=(where,msg)=>issues.push({where,msg});
+
+/* ---------- 文字宽度估算与换行 ---------- */
+function charW(c,size){return /[⺀-￯]/.test(c)?size:size*0.58}
+function estW(s,size){let w=0;for(const c of String(s))w+=charW(c,size);return w}
+function wrap(s,maxW,size){
+  const out=[];
+  String(s).split('\n').forEach(par=>{
+    let line='',w=0;
+    for(const c of par){
+      const cw=charW(c,size);
+      if(w+cw>maxW&&line){out.push(line);line='';w=0}
+      line+=c;w+=cw;
+    }
+    out.push(line);
+  });
+  return out.join('\n');
+}
+function fitSize(s,maxW,max,min){let size=max;while(size>min&&estW(s,size)>maxW)size--;return size}
+
+/* ---------- 初始化 ---------- */
+const legend=(SPEC.legend||['call','fact','proj']).map(t=>Array.isArray(t)?t:[t,LEGEND[t]||t]);
+DA.init({brand:SPEC.eyebrow||'',mark:SPEC.brand||'',legend});
+
+/* ---------- 排版：行 → 模块 → 节点 ---------- */
+const box={};          // id → {x,y,w,h,kind,module}
+const moduleOf={};     // 节点 id → 所在模块 id
+const ALL=[];
+const LAY=SPEC.layout||{};
+const rows=LAY.rows||[];
+const gapY=LAY.gapY!=null?LAY.gapY:26,gapX=LAY.gapX!=null?LAY.gapX:28;
+const top=LAY.top||Y0;
+const sumH=rows.reduce((a,r)=>a+(r.h||1),0)||1;
+const availH=Y1-top-gapY*Math.max(0,rows.length-1);
+let cy=top;
+rows.forEach(r=>{
+  const rh=availH*(r.h||1)/sumH;
+  const mods=r.modules||[];
+  const sumS=mods.reduce((a,m)=>a+(m.span||1),0)||1;
+  const availW=(X1-X0)-gapX*Math.max(0,mods.length-1);
+  let cx=X0;
+  mods.forEach(m=>{const mw=availW*(m.span||1)/sumS;placeModule(m,cx,cy,mw,rh);cx+=mw+gapX});
+  cy+=rh+gapY;
+});
+function placeModule(m,x,y,w,h){
+  ALL.push(m.id);
+  const framed=m.frame!==false;
+  box[m.id]={x,y,w,h,kind:'module'};
+  const outer=framed&&m.style==='outer';
+  if(outer) DA.outer(m.id,x,y,w,h,m.label||'',m.id,m.color||'mint');
+  else if(framed) DA.frame(m.id,x,y,w,h,m.label||'',m.id);
+  const ns=m.nodes||[];
+  if(!ns.length) return;
+  const pad=framed?20:0,head=outer?10:(framed&&m.label?48:0);
+  const ix=x+pad,iy=y+pad+head,iw=w-pad*2,ih=h-pad*2-head;
+  const gap=m.gap!=null?m.gap:24;
+  const sumW=ns.reduce((a,n)=>a+(n.w||1),0);
+  if((m.dir||'row')==='row'){
+    const nh=Math.min(ih,m.nodeH||96);
+    const ny=iy+(ih-nh)/2;
+    const avail=iw-gap*(ns.length-1);
+    let nx=ix;
+    ns.forEach(n=>{const nw=avail*(n.w||1)/sumW;placeNode(n,m,nx,ny,nw,nh);nx+=nw+gap});
+  }else{
+    const nh=Math.min((ih-gap*(ns.length-1))/ns.length,m.nodeH||96);
+    const total=nh*ns.length+gap*(ns.length-1);
+    let ny=iy+(ih-total)/2;
+    ns.forEach(n=>{placeNode(n,m,ix,ny,iw,nh);ny+=nh+gap});
+  }
+}
+function placeNode(n,m,x,y,w,h){
+  if(n.spacer) return; // 占位：留出空白给注释
+  moduleOf[n.id]=m.id;
+  box[n.id]={x,y,w,h,kind:'node',module:m.id};
+  const big=h>=80,subSize=big?19:16;
+  const size=n.size||fitSize(n.label,w-24,big?26:22,13);
+  const subFits=!n.sub||h>=58;
+  if(!subFits) warn('node '+n.id,`节点只有 ${Math.round(h)}px 高，放不下副标题，已省略；调大这一行的 h 或模块的 nodeH`);
+  DA.node(n.id,x,y,w,h,n.label,subFits?(n.sub||''):'',m.id,size);
+  if(subFits&&n.sub&&estW(n.sub,subSize)>w-16) warn('node '+n.id,`副标题"${n.sub}"太长，节点里放不下；缩短副标题或加宽节点`);
+  if(estW(n.label,size)>w-16) warn('node '+n.id,`标题"${n.label}"太长，字号缩到 ${size} 仍放不下`);
+  if(h<44) warn('node '+n.id,`节点只有 ${Math.round(h)}px 高，太挤；减少这一列的节点或调大这一行的 h`);
+}
+
+/* ---------- 连线：自动走线 ---------- */
+const edgeEnds={};
+(SPEC.edges||[]).forEach(e=>{
+  const A=box[e.from],B=box[e.to];
+  if(!A||!B){warn('edge '+e.id,`连线两端 ${e.from} → ${e.to} 找不到`);return}
+  edgeEnds[e.id]=[e.from,e.to];
+  let d,lx=0,ly=-12;
+  if(e.d){d=e.d}else{
+    const ac={x:A.x+A.w/2,y:A.y+A.h/2},bc={x:B.x+B.w/2,y:B.y+B.h/2};
+    const dx=bc.x-ac.x,dy=bc.y-ac.y;
+    const horiz=e.dir?e.dir==='h':Math.abs(dx)/((A.w+B.w)/2||1)>=Math.abs(dy)/((A.h+B.h)/2||1);
+    const bend=e.bend||0;
+    if(horiz){
+      const s=dx>=0?1:-1;
+      const sx=s>0?A.x+A.w:A.x,tx=s>0?B.x:B.x+B.w;
+      const sy=ac.y+(e.fromOffset||0),ty=bc.y+(e.toOffset||0);
+      const k=Math.max(40,Math.abs(tx-sx)*.45);
+      d=`M${sx},${sy} C${sx+s*k},${sy+bend} ${tx-s*k},${ty+bend} ${tx},${ty}`;
+    }else{
+      const s=dy>=0?1:-1;
+      const sy=s>0?A.y+A.h:A.y,ty=s>0?B.y:B.y+B.h;
+      // 起点尽量对准终点的横坐标：宽节点（比如一整行的日志）往下连时走直线，不从中间斜拉
+      const clamp=(v,b)=>Math.max(b.x+18,Math.min(b.x+b.w-18,v));
+      const sx=clamp(bc.x,A)+(e.fromOffset||0),tx=clamp(sx,B)+(e.toOffset||0);
+      const k=Math.max(30,Math.abs(ty-sy)*.45);
+      d=`M${sx},${sy} C${sx+bend},${sy+s*k} ${tx+bend},${ty-s*k} ${tx},${ty}`;
+      lx=e.label?estW(e.label,17)/2+14:0;ly=4;
+    }
+  }
+  DA.edge(e.id,d,e.type||'call',e.label||'',e.labelAt!=null?e.labelAt:.5,e.lx!=null?e.lx:lx,e.ly!=null?e.ly:ly);
+});
+
+/* ---------- 注释（挂在节点或模块旁边） ---------- */
+function placeNote(id,n){
+  const color=n.color||'amber',size=n.size||22;
+  let x=n.x,y=n.y,anchor='start';
+  if(x==null||y==null){
+    const b=box[n.at];
+    if(!b){warn('note '+id,`注释挂靠的 ${n.at} 找不到`);return}
+    const pos=n.pos||'below';
+    if(pos==='below'){x=b.x+4;y=b.y+b.h+30}
+    else if(pos==='above'){x=b.x+4;y=b.y-14}
+    else if(pos==='right'){x=b.x+b.w+18;y=b.y+b.h/2+8}
+    else if(pos==='left'){x=b.x-18;y=b.y+b.h/2+8;anchor='end'}
+    else if(pos==='inside'){x=b.x+22;y=b.y+b.h-18}
+  }
+  const s=n.width?wrap(n.text,n.width,size):n.text;
+  DA.note(id,x,y,s,color,size,anchor);
+}
+
+/* ---------- 浮层 ---------- */
+const PLACES={full:[160,160,1600,850],center:[300,290,1320,500],bottom:[90,600,1740,410],right:[880,250,950,760],left:[90,250,950,760]};
+const insetEnter={},insetPlace={};
+function reveal(ids,step,start=300){ids.forEach((id,i)=>after(start+i*step,()=>cls(id,'on',true)))}
+const BUILD={
+  /* 大字论点：lines = [{text, color, size}]；hero:true 时第一行当大标题 */
+  text(g,ins,x,y,w,h,id){
+    const ids=[];let yy=y+10;
+    (ins.lines||[]).forEach((ln,i)=>{
+      const L=typeof ln==='string'?{text:ln}:ln;
+      const hero=i===0&&ins.hero;
+      const size=L.size||(hero?52:28);
+      const s=wrap(L.text,w-(hero?72:120),size);
+      const m=el('g',{class:'fade',id:`${id}-${i}`},g);
+      if(!hero) el('circle',{cx:x+48,cy:yy+size*0.2,r:7,style:`fill:var(--${L.color||'blue'})`},m);
+      text(m,x+(hero?36:72),yy+size*0.55,s,'hand',{'font-size':size,style:`fill:var(--${hero?(L.color||'mint'):'ink'})`});
+      yy+=s.split('\n').length*size*1.4+(hero?26:18);
+      ids.push(`${id}-${i}`);
+    });
+    if(yy>y+h+20) warn('inset '+id,'文字超出浮层：删几行，或换 place:"full"');
+    return ()=>reveal(ids,ins.step||1300,400);
+  },
+  /* 卡片：items = [{head, text, color}] */
+  cards(g,ins,x,y,w,h,id){
+    const items=ins.items||[],n=items.length||1;
+    const gap=16,foot=ins.footer?60:0,ch=Math.min(150,(h-foot-gap*(n-1)-10)/n);
+    const ids=[];
+    const hs=Math.min(34,ch*0.32);
+    const headW=Math.max(...items.map(it=>estW(it.head||'',hs)),0)+44;
+    items.forEach((it,i)=>{
+      const cy=y+i*(ch+gap);
+      const m=el('g',{class:'fade',id:`${id}-${i}`},g);
+      const c=it.color||'blue';
+      el('rect',{x:x+36,y:cy,width:w-72,height:ch,rx:14,style:`fill:var(--${c});fill-opacity:.07;stroke:var(--${c})`},m);
+      text(m,x+64,cy+ch/2+hs*0.35,it.head||'','hand',{'font-size':hs,style:'fill:var(--amber)'});
+      const ts=Math.min(23,ch*0.2);
+      const body=wrap(it.text||'',w-72-headW-64,ts);
+      const lines=body.split('\n').length;
+      text(m,x+64+headW,cy+ch/2-(lines-1)*ts*0.68+ts*0.35,body,'hand',{'font-size':ts});
+      if(lines*ts*1.4>ch-8) warn('inset '+id,`第 ${i+1} 张卡片字太多，放不下`);
+      ids.push(`${id}-${i}`);
+    });
+    if(ins.footer){const m=el('g',{class:'fade',id:`${id}-f`},g);text(m,x+36,y+n*(ch+gap)+34,wrap(ins.footer,w-72,23),'hand',{'font-size':23,style:`fill:var(--${ins.footerColor||'coral'})`});ids.push(`${id}-f`)}
+    return ()=>reveal(ids,ins.step||1100,400);
+  },
+  /* 步骤链：steps = [{label, lock}]；lines = 下方说明 */
+  steps(g,ins,x,y,w,h,id){
+    const steps=ins.steps||[];
+    const size=ins.size||17,gap=18,pad=30;
+    let cx=x+36,cy=y+4;const ids=[];
+    steps.forEach((st,i)=>{
+      const S=typeof st==='string'?{label:st}:st;
+      const cw=estW(S.label,size)+pad;
+      if(cx+cw>x+w-36){cx=x+36;cy+=66}
+      DA.chip(g,cx,cy,cw,46,S.label,`${id}-c${i}`,size,S.lock?'lock':'');
+      const nx=cx+cw+gap;
+      const nextW=i<steps.length-1?estW((typeof steps[i+1]==='string'?steps[i+1]:steps[i+1].label),size)+pad:0;
+      if(i<steps.length-1&&nx+nextW<=x+w-36) DA.arrow(g,`M${cx+cw+3},${cy+23} L${nx-3},${cy+23}`);
+      ids.push(`${id}-c${i}`);cx=nx;
+    });
+    let ly=cy+46+50;const lids=[];
+    (ins.lines||[]).forEach((ln,i)=>{
+      const L=typeof ln==='string'?{text:ln}:ln;
+      const sz=L.size||21;
+      const s=wrap(L.text,w-72,sz);
+      const m=el('g',{class:'fade',id:`${id}-l${i}`},g);
+      text(m,x+36,ly,s,'hand',{'font-size':sz,style:`fill:var(--${L.color||'ink'})`});
+      ly+=s.split('\n').length*sz*1.4+10;lids.push(`${id}-l${i}`);
+    });
+    if(ly-24>y+h) warn('inset '+id,'步骤和说明超出浮层：减少说明行或换更大的 place');
+    const st=ins.step||Math.min(650,Math.round(3000/Math.max(1,ids.length))); // 步骤多就出得快一点，说明行不至于等太久
+    return ()=>{reveal(ids,st,300);reveal(lids,700,300+ids.length*st)};
+  },
+  /* 表格：columns, rows, widths；三列以上时最后一列标黄 */
+  table(g,ins,x,y,w,h,id){
+    const cols=ins.columns||[],rowsT=ins.rows||[];
+    const widths=ins.widths||cols.map(()=>1),sw=widths.reduce((a,b)=>a+b,0);
+    const iw=w-72;const xs=[];let acc=x+36;widths.forEach(v=>{xs.push(acc);acc+=iw*v/sw});
+    const fs=ins.size||22;
+    cols.forEach((c,i)=>text(g,xs[i],y+8,c,'hand',{'font-size':fs,style:'fill:var(--ink2)'}));
+    const rh=Math.min(92,(h-40)/Math.max(1,rowsT.length));const ids=[];
+    rowsT.forEach((r,ri)=>{
+      const yy=y+28+ri*rh;
+      const m=el('g',{class:'row',id:`${id}-${ri}`},g);
+      el('line',{x1:x+28,x2:x+w-28,y1:yy,y2:yy,style:'stroke:var(--dim);stroke-opacity:.35'},m);
+      r.forEach((cell,ci)=>{
+        const cw=iw*widths[ci]/sw-18;
+        const s=wrap(cell,cw,fs);
+        const n=s.split('\n').length;
+        const hl=ci===r.length-1&&r.length>2;
+        text(m,xs[ci],yy+rh/2-(n-1)*fs*0.68+fs*0.35,s,ci===0?'mono':'hand',{'font-size':fs,style:hl?'fill:var(--amber)':null});
+        if(n*fs*1.38>rh-4) warn('inset '+id,`第 ${ri+1} 行第 ${ci+1} 格字太多`);
+      });
+      ids.push(`${id}-${ri}`);
+    });
+    return ()=>reveal(ids,ins.step||650,300);
+  },
+  /* 并发演示：tasks = [{label, len(0-1), exclusive}]；order:"model"（按发起顺序进历史，默认）或 "finish" */
+  race(g,ins,x,y,w,h,id){
+    const tasks=ins.tasks||[];
+    const labW=Math.max(...tasks.map(t=>estW(t.label,18)),60)+30;
+    const slotW=Math.min(340,w*0.27),sx=x+w-36-slotW;
+    const bx=x+36+labW,bw=sx-40-bx;
+    const foot=ins.footer?50:0;
+    const rh=Math.min(54,(h-40-foot)/Math.max(1,tasks.length));
+    if(rh<38) warn('inset '+id,`任务行只有 ${Math.round(rh)}px 高，太挤；减少任务数，或换 place:"center"/"full"`);
+    text(g,bx,y+4,ins.runLabel||'执行','t-small');
+    text(g,sx,y+4,ins.commitLabel||(ins.order==='finish'?'谁先跑完谁先进历史':'按模型发起的顺序进历史'),'t-small');
+    tasks.forEach((t,i)=>{
+      const yy=y+20+i*rh;
+      text(g,x+36,yy+26,t.label,'mono',{'font-size':18,style:`fill:var(--${t.exclusive?'coral':'ink2'})`});
+      el('rect',{x:bx,y:yy+8,width:bw,height:24,rx:6,style:'fill:rgba(255,255,255,.035)'},g);
+      el('rect',{x:bx,y:yy+8,width:0,height:24,rx:6,class:'bar',id:`${id}-b${i}`,style:`fill:var(--${t.exclusive?'coral':'blue'});opacity:.75`},g);
+      const c=el('g',{id:`${id}-s${i}`},g);
+      el('rect',{x:sx,y:yy+4,width:slotW,height:32,rx:8,style:'fill:none;stroke:var(--dim);stroke-dasharray:5 6'},c);
+      text(c,sx+16,yy+26,`位置 ${i+1}`,'mono',{'font-size':16,style:'fill:var(--dim)'});
+    });
+    const barrier=el('line',{x1:0,y1:y+20,x2:0,y2:y+20+tasks.length*rh,style:'stroke:var(--coral);stroke-dasharray:6 6;stroke-width:2',opacity:0},g);
+    if(ins.footer) text(g,x+36,y+20+tasks.length*rh+40,wrap(ins.footer,w-72,21),'hand',{'font-size':21,style:'fill:var(--amber)'});
+    const slot=(i,state)=>{const c=$(`${id}-s${i}`),r=c.querySelector('rect'),t=c.querySelector('text');
+      if(state==='e'){r.style.cssText='fill:none;stroke:var(--dim);stroke-dasharray:5 6';t.textContent=`位置 ${i+1}`;t.style.fill='var(--dim)'}
+      if(state==='w'){r.style.cssText='fill:none;stroke:var(--ink2);stroke-dasharray:5 6';t.textContent=`${tasks[i].label} 跑完了 · 等前面`;t.style.fill='var(--ink2)'}
+      if(state==='c'){r.style.cssText='fill:var(--amber);fill-opacity:.18;stroke:var(--amber);stroke-dasharray:none';t.textContent=`${tasks[i].label} 已进历史`;t.style.fill='var(--amber)'}};
+    const T=3600;
+    const run=()=>{
+      tasks.forEach((t,i)=>{bar(`${id}-b${i}`,0,0,bx);slot(i,'e')});barrier.setAttribute('opacity',0);
+      const done={};
+      const par=tasks.map((t,i)=>[t,i]).filter(([t])=>!t.exclusive);
+      const ex=tasks.map((t,i)=>[t,i]).filter(([t])=>t.exclusive);
+      par.forEach(([t,i])=>{const len=t.len||0.5,ms=T*len;after(200,()=>bar(`${id}-b${i}`,bw*len,ms));done[i]=200+ms});
+      const parEnd=Math.max(200,...par.map(([,i])=>done[i]));
+      const parLen=Math.max(0,...par.map(([t])=>t.len||0.5));
+      let start=parEnd+300,offX=bx+bw*parLen+10;
+      ex.forEach(([t,i])=>{
+        const len=t.len||0.25,ms=T*len,x0=offX;
+        after(start-150,()=>{barrier.setAttribute('x1',x0-5);barrier.setAttribute('x2',x0-5);barrier.setAttribute('opacity',1)});
+        after(start,()=>bar(`${id}-b${i}`,Math.min(bw*len,bx+bw-x0),ms,x0));
+        done[i]=start+ms;start+=ms+250;offX+=bw*len+10;
+      });
+      if(ins.order==='finish'){
+        tasks.forEach((t,i)=>after(done[i]+80,()=>slot(i,'c')));
+      }else{
+        let last=0;
+        tasks.forEach((t,i)=>{
+          const ready=Math.max(done[i],last);
+          if(ready>done[i]+30) after(done[i]+60,()=>slot(i,'w'));
+          after(ready+120,()=>slot(i,'c'));last=ready+200;
+        });
+      }
+      return Math.max(...Object.values(done))+4200; // 结果停留几秒再重播
+    };
+    return ()=>{const period=run();after(period,function loop(){run();after(period,loop)})};
+  },
+};
+(SPEC.insets||[]).forEach(ins=>{
+  const [x,y,w,h]=Array.isArray(ins.box)?ins.box:(PLACES[ins.place||'center']||PLACES.center);
+  insetPlace[ins.id]=ins.place||'center';
+  const g=DA.inset(ins.id,x,y,w,h,'');
+  let ty=y+56;
+  if(ins.title){text(g,x+36,y+62,ins.title,'hand',{'font-size':ins.titleSize||32,style:`fill:var(--${ins.titleColor||'ink'})`});ty=y+116}
+  const fn=BUILD[ins.type];
+  if(!fn){warn('inset '+ins.id,`不认识的浮层类型 ${ins.type}`);return}
+  insetEnter[ins.id]=fn(g,ins,x,ty,w,y+h-ty-20,ins.id);
+});
+
+/* ---------- 口播字幕（按 C 切换，或 ?caption=1） ---------- */
+const cap=document.createElement('div');cap.id='cap';document.getElementById('stage').appendChild(cap);
+let capOn=Q.get('caption')==='1';cap.classList.toggle('on',capOn);
+DA.onKey=e=>{if(e.key==='c'||e.key==='C'){capOn=!capOn;cap.classList.toggle('on',capOn)}};
+DA.onScene=(i,s)=>{cap.textContent=s._say||''};
+
+/* ---------- 镜头 ---------- */
+const allEdges=Object.keys(edgeEnds);
+function camFor(ids,pad=60){
+  const bs=ids.map(id=>box[id]).filter(Boolean);
+  if(!bs.length) return FULL;
+  let x0=Math.min(...bs.map(b=>b.x))-pad,y0=Math.min(...bs.map(b=>b.y))-pad-40;
+  const x1=Math.max(...bs.map(b=>b.x+b.w))+pad,y1=Math.max(...bs.map(b=>b.y+b.h))+pad;
+  let w=x1-x0,h=y1-y0;
+  if(w/h>16/9){const nh=w*9/16;y0-=(nh-h)/2;h=nh}else{const nw=h*16/9;x0-=(nw-w)/2;w=nw}
+  if(w>=1920) return FULL;
+  x0=Math.max(0,Math.min(x0,1920-w));y0=Math.max(0,Math.min(y0,1080-h));
+  return [x0,y0,w,h];
+}
+function targetOf(edgeId,rev){const e=edgeEnds[edgeId];return e?(rev?e[0]:e[1]):null}
+function traceSteps(tr){if(!tr)return [];return Array.isArray(tr)?tr:(tr.steps||[])}
+const S=(SPEC.scenes||[]).map((sc,si)=>{
+  const sid='s'+(si+1);
+  const noteIds=(sc.notes||[]).map((n,ni)=>{const id=`${sid}-n${ni}`;placeNote(id,n);return id});
+  const insets=sc.inset?(Array.isArray(sc.inset)?sc.inset:[sc.inset]):[];
+  const overlay=insets.some(i=>['full','center'].includes(insetPlace[i]));
+  let show,half;
+  if(sc.show==null||sc.show==='all'){show=overlay?[]:ALL.slice();half=overlay?ALL.slice():[]}
+  else{show=sc.show.slice();half=[]}
+  if(sc.half==='all') half=ALL.slice(); else if(Array.isArray(sc.half)) sc.half.forEach(h=>{if(!half.includes(h))half.push(h)});
+  show.forEach(id=>{const m=moduleOf[id];if(m&&!show.includes(m)&&!half.includes(m))half.push(m)});
+  const steps=traceSteps(sc.trace);
+  let edges;
+  if(sc.edges==='all') edges=allEdges.slice();
+  else if(sc.edges==='auto'){const set=new Set(show);edges=allEdges.filter(e=>{const [a,b]=edgeEnds[e];return (set.has(a)||set.has(moduleOf[a]))&&(set.has(b)||set.has(moduleOf[b]))})}
+  else edges=(sc.edges||[]).slice();
+  [...(sc.flow||[]).map(f=>f.edge),...steps.map(t=>t.edge)].forEach(e=>{if(e&&!edges.includes(e))edges.push(e)});
+  return {
+    k:sc.key||sid,t:sc.title||'',_say:sc.say||'',
+    focus:show,half,lit:sc.lit||[],edges,notes:noteIds,insets,
+    cam:sc.zoom&&!insets.length?camFor(Array.isArray(sc.zoom)?sc.zoom:[sc.zoom]):null, // 有浮层时不推镜头：推近的内容会被浮层挡住
+    legend:!!sc.legendPulse,
+    enter(){
+      if(sc.draw) DA.drawIn(ALL.map(a=>[a]));
+      // 走一圈这类镜头，光点自己带字；连线上的固定标签默认藏起来，免得糊成一片
+      if(sc.edgeLabels===false||(steps.length&&sc.edgeLabels!==true)) for(const id in E) E[id].lab&&E[id].lab.classList.remove('on');
+      (sc.flow||[]).forEach(f=>{
+        const k=f.count||2,d=f.dur||2000,gp=.25;
+        for(let i=0;i<k;i++) spawn(f.edge,{loop:true,dur:d,gap:gp,delay:i*d*(1+gp)/k+(f.delay||0),size:5.5,label:i===0?f.label:null,rev:!!f.rev});
+      });
+      if(steps.length){
+        const total=steps.reduce((a,t)=>a+(t.dur||1000),0)+1600;
+        const period=sc.trace&&!Array.isArray(sc.trace)&&typeof sc.trace.every==='number'?sc.trace.every:total; // 注意：数组自带 every 方法，不能直接读
+        every(Math.max(period,total),()=>{
+          DA.chain(steps.map(t=>[t.edge,{label:t.label,rev:!!t.rev,dur:t.dur||1000,post:()=>{const n=targetOf(t.edge,t.rev);if(n&&$('n-'+n))flash('n-'+n,600)}}]));
+        });
+      }
+      (sc.states||[]).forEach(st=>{
+        const elId=($('n-'+st.node)?'n-':'f-')+st.node;
+        after(st.at||0,()=>cls(elId,st.state,true));
+        if(st.until) after(st.until,()=>cls(elId,st.state,false));
+      });
+      insets.forEach(i=>insetEnter[i]&&insetEnter[i]());
+    },
+  };
+});
+
+/* ---------- 自检（?check=1） ---------- */
+function bboxOf(node){try{return node.getBBox()}catch(e){return null}}
+function overlap(a,b){return a.x<b.x+b.width&&b.x<a.x+a.width&&a.y<b.y+b.height&&b.y<a.y+a.height}
+function selfCheck(){
+  for(const id in DA.nodes){
+    const nd=DA.nodes[id];
+    nd.g.querySelectorAll('text').forEach(t=>{const b=bboxOf(t);if(b&&b.width>nd.w-6) warn('node '+id,`文字"${t.textContent}"实际宽 ${Math.round(b.width)}px，超出节点宽 ${Math.round(nd.w)}px`)});
+  }
+  for(const id in N) N[id]._fit&&N[id]._fit();
+  S.forEach((s,si)=>{
+    const bs=s.notes.map(id=>[id,bboxOf(N[id])]).filter(([,b])=>b&&b.width>0);
+    bs.forEach(([id,b])=>{
+      if(b.x<0||b.y<140||b.x+b.width>1920||b.y+b.height>1040) warn(`镜头 ${si+1} 注释 ${id}`,'注释跑出画面或压到标题区');
+      for(const nid in DA.nodes){const nb=DA.nodes[nid];if(overlap(b,{x:nb.x,y:nb.y,width:nb.w,height:nb.h})) warn(`镜头 ${si+1} 注释 ${id}`,`压住了节点 ${nid}；换个 pos 或给 x/y`)}
+    });
+    for(let i=0;i<bs.length;i++)for(let j=i+1;j<bs.length;j++) if(overlap(bs[i][1],bs[j][1])) warn(`镜头 ${si+1}`,`注释 ${bs[i][0]} 和 ${bs[j][0]} 重叠`);
+  });
+  for(const id in I){
+    const g=I[id];const r=g.querySelector('.ibg');
+    const R={x:+r.getAttribute('x'),y:+r.getAttribute('y'),w:+r.getAttribute('width'),h:+r.getAttribute('height')};
+    g.querySelectorAll('text').forEach(t=>{const b=bboxOf(t);if(b&&(b.x<R.x-2||b.x+b.width>R.x+R.w+2||b.y+b.height>R.y+R.h+2)) warn('inset '+id,`"${t.textContent.slice(0,18)}…" 超出浮层边框`)});
+  }
+  const pre=document.createElement('pre');pre.id='archtalk-report';
+  pre.textContent=JSON.stringify({scenes:S.length,issues});
+  document.body.appendChild(pre);
+  document.title='ARCHTALK_CHECK_DONE';
+}
+DA.beforeFirst=()=>{if(CHECK){selfCheck();return false}};
+DA.start(S,ALL);
+})();
+</script>
+</body>
+</html>
